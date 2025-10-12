@@ -114,7 +114,7 @@ class DeleteRecordsThread(QThread):
 
 	def run(self):
 		need_delete_record_ids = [
-			record.doc_id for record in self.records if record.get("_del_flag") == 1
+			record.doc_id for record in self.records if record.get("_need_download") == 1
 		]
 		for record_id in need_delete_record_ids:
 			self.db.remove(doc_ids=[record_id])
@@ -132,7 +132,7 @@ class MoveRecordsThread(QThread):
 
 	def run(self):
 		need_move_records = [
-			record for record in self.records if record.get("_mov_flag") == 1
+			record for record in self.records if record.get("_need_download") == 1
 		]
 		self.deleted_db.insert_multiple(need_move_records[::-1])
 
@@ -170,7 +170,7 @@ class DatabaseViewerDialog(QDialog):
 		self.refresh_btn = QPushButton("刷新")
 		self.check_image_urls_btn = QPushButton("检查未下载的图片")
 		self.check_video_urls_btn = QPushButton("检查未下载的视频")
-		self.delete_outdated_record_btn = QPushButton("删除失效推文(Beta)")
+		self.delete_outdated_record_btn = QPushButton("删除过期记录(Beta)")
 
 		# 连接按钮点击事件
 		self.refresh_btn.clicked.connect(self.refresh_table)
@@ -220,6 +220,7 @@ class DatabaseViewerDialog(QDialog):
 		# else:
 		# 	print("Exact match disabled")
 		self.refresh_table()
+		print(self.failed_record_list)
 
 	def delete_outdated_record(self):
 		# 创建一个消息框
@@ -227,7 +228,7 @@ class DatabaseViewerDialog(QDialog):
 		msg_box.setIcon(QMessageBox.Warning)
 		msg_box.setWindowTitle("删除过期记录")
 		msg_box.setText(
-			"你必须要知道你在做什么！\n\n此操作不会向推特服务器检测推文是否已被删除，而是下载管理器会标记包含无法下载媒体的推文。(服务器返回响应码 != 200)\n\n如果你理解这点，你可以选择从数据库中彻底删除这些记录，或将它们移到另一个文件中：deleted.db")
+			"你必须要知道你在做什么！\n\n此操作不会向推特服务器检测推文是否已被删除，而是直接删除包含未下载媒体的记录。如果你已经下载所有可被下载的媒体，那么剩下的就是失效的推文。\n\n如果你理解这点，你可以选择从库中彻底删除记录，或将它们移到另一个文件中：deleted.db")
 
 		# 添加按钮
 		delete_button = msg_box.addButton("彻底删除记录", QMessageBox.AcceptRole)
@@ -248,7 +249,7 @@ class DatabaseViewerDialog(QDialog):
 
 	def secondary_operation_confirmation(self, operation_type):
 		# 收集需要删除的记录
-		records_to_delete = [record for record in self.records if record.get("id") in self.failed_record_list]
+		records_to_delete = [record for record in self.records if record.get("_need_download") == 1]
 
 		operation_type_text = "删除" if operation_type == "del" else "移动"
 
@@ -261,14 +262,8 @@ class DatabaseViewerDialog(QDialog):
 		if confirmation_dialog.exec() == QDialog.Accepted:
 			# 用户确认删除
 			if operation_type == "del":
-				for record in self.records:
-					if record.get("id") in self.failed_record_list:
-						record["_del_flag"] = 1
 				self.start_delete_records()
 			elif operation_type == "mov":
-				for record in self.records:
-					if record.get("id") in self.failed_record_list:
-						record["_mov_flag"] = 1
 				self.start_move_records()
 
 	def start_delete_records(self):
@@ -281,7 +276,6 @@ class DatabaseViewerDialog(QDialog):
 
 	def on_delete_finished(self, count):
 		self.progress_dialog.close()
-		self.failed_record_list = []
 		QMessageBox.information(self, "操作完成", f"{count} 条记录已删除")
 		self.refresh_table()
 
@@ -295,9 +289,49 @@ class DatabaseViewerDialog(QDialog):
 
 	def on_move_finished(self, count):
 		self.progress_dialog.close()
-		self.failed_record_list = []
 		QMessageBox.information(self, "操作完成", f"{count} 条记录已移动到 deleted.db")
 		self.refresh_table()
+
+	# def delete_records_permanently(self):
+	# 	need_delete_record_ids = []
+	#
+	# 	# 查找需要删除的记录
+	# 	for record in self.records:
+	# 		if record.get("_need_download") == 1:
+	# 			need_delete_record_ids.append(record.doc_id)  # 使用 doc_id 以便从 TinyDB 中删除
+	#
+	# 	# 删除 main.db 中的指定记录
+	# 	for record_id in need_delete_record_ids:
+	# 		db.remove(doc_ids=[record_id])
+	#
+	# 	# 显示成功消息框
+	# 	QMessageBox.information(self, "操作完成", f"{len(need_delete_record_ids)} 条记录已删除")
+	#
+	# 	self.refresh_table()
+	#
+	# def move_records_to_deleted_db(self):
+	# 	# 删除记录的数据库路径
+	# 	self.deleted_db = TinyDB('deleted.db')
+	#
+	# 	need_move_records = []
+	# 	need_move_record_ids = []
+	#
+	# 	# 查找需要移动的记录
+	# 	for record in self.records:
+	# 		if record.get("_need_download") == 1:
+	# 			need_move_records.append(record)
+	# 			need_move_record_ids.append(record.doc_id)  # 使用 doc_id 以便从 TinyDB 中删除
+	#
+	# 	# 将记录插入 deleted.db
+	# 	self.deleted_db.insert_multiple(need_move_records[::-1])
+	#
+	# 	# 删除 main.db 中的指定记录
+	# 	for record_id in need_move_record_ids:
+	# 		db.remove(doc_ids=[record_id])
+	#
+	# 	# 显示成功消息框
+	# 	QMessageBox.information(self, "操作完成", f"{len(need_move_records)} 条记录已移动到 deleted.db")
+	# 	self.refresh_table()
 
 	def check_image_urls(self):
 		urls = []
@@ -395,7 +429,6 @@ class DatabaseViewerDialog(QDialog):
 
 		self.dialog.setLayout(layout)
 		self.dialog.exec()
-
 	def download_video(self):
 		all_tasks = []
 		for row, record in enumerate(self.records):
@@ -657,7 +690,7 @@ class DatabaseViewerDialog(QDialog):
 class MainWindow(QMainWindow):
 	def __init__(self):
 		super().__init__()
-		self.setWindowTitle("twegui")
+		self.setWindowTitle("twegui smart-del-ver")
 		self.resize(400, 300)
 		self.center_window()
 
