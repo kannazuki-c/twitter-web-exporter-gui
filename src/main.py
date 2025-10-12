@@ -13,7 +13,8 @@ from tinydb import TinyDB, Query
 from threading import Lock
 
 # 初始化数据库
-db = TinyDB("a.db")
+db = TinyDB("a.db")  # main db
+ddb = TinyDB("deleted.db")
 
 
 class JSONProcessorThread(QThread):
@@ -26,10 +27,15 @@ class JSONProcessorThread(QThread):
 
 	def run(self):
 		try:
-			# 从数据库中预加载现有的所有ID到内存中的集合中
-			existing_ids = {record['id'] for record in db.all() if 'id' in record}
+			# 1) 预加载 main db 与 deleted db 的所有 id（保证性能：集合 O(1) 查询）
+			existing_ids = set()
+			for store in (db, ddb):
+				for rec in store.all():
+					_id = rec.get('id')
+					if _id is not None:
+						existing_ids.add(_id)
 
-			# 读取 JSON 文件
+			# 2) 读取 JSON 文件
 			with open(self.file_path, "r", encoding="utf-8") as f:
 				data = json.load(f)
 
@@ -37,22 +43,28 @@ class JSONProcessorThread(QThread):
 				self.completed.emit(-1)
 				return
 
-			new_entries_list = []  # 用于批量插入的新记录列表
-			total_entries = len(data)
+			new_entries_list = []
+			total_entries = len(data) or 1  # 防止除零
 
+			# 3) 只添加：不在 main db 且不在 deleted db 的条目
 			for i, entry in enumerate(data):
-				if 'id' in entry and entry['id'] not in existing_ids:
-					new_entries_list.append(entry)  # 仅添加未重复的记录
-					existing_ids.add(entry['id'])  # 将新记录的ID添加到缓存集合
+				_id = entry.get('id')
+				if _id and _id not in existing_ids:
+					new_entries_list.append(entry)
+					# 写入前就把 id 放进集合，避免 JSON 内部重复
+					existing_ids.add(_id)
 
 				if i % 10 == 0:
-					self.progress.emit(int((i / total_entries) * 100))
+					self.progress.emit(int(i * 100 / total_entries))
 
-			# 批量插入新记录
-			db.insert_multiple(new_entries_list[::-1])
+			# 4) 批量插入（保持原来的逆序逻辑）
+			if new_entries_list:
+				db.insert_multiple(new_entries_list[::-1])
+
+			self.progress.emit(100)
 			self.completed.emit(len(new_entries_list))
 
-		except Exception as e:
+		except Exception:
 			self.completed.emit(-1)
 
 
