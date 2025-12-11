@@ -82,7 +82,7 @@ The GUI also integrates scanning and downloading functionality for images and vi
 - 1. Use the built-in downloader (recommended) - Based on aria2, with automatic categorized storage
 - 2. Export all image/video URLs and copy them to a queue download tool (such as IDM, FDM, [AB Download Manager](https://github.com/amir1376/ab-download-manager)) for batch downloading
 
-## * How Does the GUI Detect if Associated Media is Downloaded?
+## ❓ How Does the GUI Detect if Associated Media is Downloaded?
 
 You can select the directory to be scanned. As long as you keep the original media filenames, they can be detected. The rules are as follows:
 

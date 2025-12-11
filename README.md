@@ -82,7 +82,7 @@ gui 还集成了 Tweets 中图片与视频的扫描、下载功能，在导入 T
 - 1.使用内建下载器（推荐）- 基于 aria2，自动分类存储
 - 2.导出所有图片/视频的 URL，复制到队列下载工具（如 IDM、FDM、[AB Download Manager](https://github.com/amir1376/ab-download-manager)）中批量下载
 
-## * gui 如何检测关联媒体是否已下载？
+## ❓gui 如何检测关联媒体是否已下载？
 
 您可选择被扫描的目录，只要保持原始的媒体文件名就可以被扫描到。规则如下：
 
