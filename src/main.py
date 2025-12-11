@@ -88,7 +88,6 @@ class DeleteConfirmationDialog(QDialog):
 		self.record_list = QListWidget()
 		for record in records_to_delete:
 			self.record_list.addItem(f"{record['full_text']}")
-		# self.record_list.addItem(f"ID: {record.doc_id}, Text: {record['full_text']}")
 		layout.addWidget(self.record_list)
 
 		# 按钮
@@ -322,7 +321,7 @@ class DatabaseViewerDialog(QDialog):
 
 	def check_image_urls(self):
 		urls = []
-		for row, record in enumerate(self.records):
+		for record in self.records:
 			if record.get("_need_download"):  # 并不代表一定有要下载的图片，也可能是视频，所以要做二次判断
 				tasks = record.get("_photo_download_tasks")
 				if tasks:
@@ -363,7 +362,6 @@ class DatabaseViewerDialog(QDialog):
 		
 		# dialog关闭后，如果进行了下载才刷新主窗口
 		if self.download_occurred:
-			print("检测到下载已进行，刷新表格...")
 			self.refresh_table()
 
 	def download_image_0(self):
@@ -378,7 +376,7 @@ class DatabaseViewerDialog(QDialog):
 
 	def download_image(self, batch_size=-1):
 		all_tasks = []
-		for row, record in enumerate(self.records):
+		for record in self.records:
 			if record.get("_need_download", 0):
 				tasks = record.get("_photo_download_tasks")
 				if tasks:
@@ -386,10 +384,8 @@ class DatabaseViewerDialog(QDialog):
 						if self.is_need_download(task['idr']):
 							all_tasks.append(task)
 		from downloader import DownloadWindow
-		if batch_size == -1 or batch_size >= len(all_tasks):
-			download_window = DownloadWindow(all_tasks, base_path=self.base_path, parent=self)
-		else:
-			download_window = DownloadWindow(all_tasks[:batch_size], base_path=self.base_path, parent=self)
+		tasks_to_download = all_tasks if batch_size == -1 else all_tasks[:batch_size]
+		download_window = DownloadWindow(tasks_to_download, base_path=self.base_path, parent=self)
 		download_window.exec()
 		
 		# 返回是否进行了下载
@@ -402,7 +398,7 @@ class DatabaseViewerDialog(QDialog):
 
 	def check_video_urls(self):
 		urls = []
-		for row, record in enumerate(self.records):
+		for record in self.records:
 			if record.get("_need_download"):  # 同上
 				tasks = record.get("_video_download_tasks")
 				if tasks:
@@ -436,7 +432,6 @@ class DatabaseViewerDialog(QDialog):
 		
 		# dialog关闭后，如果进行了下载才刷新主窗口
 		if self.download_occurred:
-			print("检测到下载已进行，刷新表格...")
 			self.refresh_table()
 	
 	def download_video_wrapper(self):
@@ -446,7 +441,7 @@ class DatabaseViewerDialog(QDialog):
 			self.download_occurred = True
 	def download_video(self):
 		all_tasks = []
-		for row, record in enumerate(self.records):
+		for record in self.records:
 			if record.get("_need_download", 0):
 				tasks = record.get("_video_download_tasks")
 				if tasks:
@@ -481,7 +476,6 @@ class DatabaseViewerDialog(QDialog):
 				file_name_without_extension = os.path.splitext(file)[0]
 				self.downloaded_files.append(file_name_without_extension)
 
-		self.records = []
 		self.records = db.all()[::-1]  # 按逆序加载
 		self.table.setRowCount(len(self.records))
 
@@ -603,10 +597,7 @@ class DatabaseViewerDialog(QDialog):
 		# 更新提示标签信息
 		text = f"已归档{len(self.records)}条推文。扫描到{len(photos)}张图片和{len(videos)}条视频。"
 
-		count = 0
-		for row, record in enumerate(self.records):
-			if record.get("_need_download"):
-				count += 1
+		count = sum(1 for record in self.records if record.get("_need_download"))
 
 		if count == 0:
 			text += "所有推文媒体均已下载！"
@@ -866,7 +857,6 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
 	app = QApplication(sys.argv)
-	# app.setStyle("Fusion")
 	app.setFont(QFont("Cascadia Mono, Microsoft YaHei", 8))
 
 	# 将 Base64 编码转换为 QIcon，并设置全局图标

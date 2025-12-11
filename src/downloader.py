@@ -13,8 +13,6 @@ from PySide6.QtCore import Signal, QObject, QTimer
 from PySide6.QtGui import QScreen
 import aria2p
 
-failed_record_list = []
-
 # 全局 aria2 管理器实例
 global_aria2_manager = None
 
@@ -135,7 +133,7 @@ class Aria2Manager:
             self.port = None
             self.api = None
             print("aria2c RPC 服务已停止")
-    
+
     def add_download(self, url, download_dir, file_name):
         """添加下载任务"""
         if not self.api:
