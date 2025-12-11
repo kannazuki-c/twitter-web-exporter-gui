@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, QObject, QTimer
 from PySide6.QtGui import QScreen
 import aria2p
+from i18n import t, get_language
 
 # 全局 aria2 管理器实例
 global_aria2_manager = None
@@ -209,19 +210,19 @@ class DownloadMonitor(QObject):
                 
                 # 显示速度信息
                 speed_mb = download.download_speed / 1024 / 1024
-                self.status_update.emit(self.task_id, f"下载中 ({speed_mb:.2f} MB/s)")
+                self.status_update.emit(self.task_id, t('downloading_speed', speed=speed_mb))
         
         elif status == "complete":
             # 下载完成
             self.progress.emit(self.task_id, 100)
-            self.status_update.emit(self.task_id, "已完成")
+            self.status_update.emit(self.task_id, t('completed'))
             self.stop()
             self.finished.emit(self.task_id)
         
         elif status == "error":
             # 下载失败
-            error_msg = download.error_message or "未知错误"
-            self.status_update.emit(self.task_id, f"下载失败: {error_msg}")
+            error_msg = download.error_message or "Unknown error"
+            self.status_update.emit(self.task_id, t('download_failed', error=error_msg))
             if self.parent():
                 self.parent().add_to_failed_record_list(self.record_id)
             self.stop()
@@ -229,7 +230,7 @@ class DownloadMonitor(QObject):
         
         elif status == "removed":
             # 任务被移除
-            self.status_update.emit(self.task_id, "任务已取消")
+            self.status_update.emit(self.task_id, t('task_cancelled'))
             self.stop()
             self.finished.emit(self.task_id)
     
@@ -293,6 +294,14 @@ def load_config():
     if not config.has_option('database', 'deleted_db'):
         config.set('database', 'deleted_db', 'deleted.db')
     
+    # 通用配置节
+    if not config.has_section('general'):
+        config.add_section('general')
+    
+    # 语言设置，默认为英文
+    if not config.has_option('general', 'language'):
+        config.set('general', 'language', 'en')
+    
     return config
 
 
@@ -318,8 +327,10 @@ def get_download_path(base_path, file_type, batch_number):
     batch_dir = f"{year}.G{batch_number}"
     
     if file_type == "photo":
-        # 图片路径: base_path/年份.G批号/图
-        return os.path.join(base_path, batch_dir, "图")
+        # 图片路径: base_path/年份.G批号/图(或Images)
+        # 根据当前语言选择文件夹名称
+        folder_name = "图" if get_language() == "zh-CN" else "Images"
+        return os.path.join(base_path, batch_dir, folder_name)
     else:
         # 视频路径: base_path/年份.G批号
         return os.path.join(base_path, batch_dir)
@@ -331,7 +342,7 @@ class DownloadWindow(QDialog):
     
     def __init__(self, tasks, base_path=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("下载管理器 (Aria2)")
+        self.setWindowTitle(t('download_manager_title'))
         self.resize(600, 400)
         self.tasks = tasks
         self.aria2_manager = global_aria2_manager
@@ -361,15 +372,15 @@ class DownloadWindow(QDialog):
         layout = QVBoxLayout(self)
 
         # 进度条和标签
-        self.progress_label = QLabel("准备下载...")
-        self.progress_label.setText(f" {len(self.tasks)} 个任务已被添加。当前批号: G{self.batch_number}")
+        self.progress_label = QLabel(t('preparing_download'))
+        self.progress_label.setText(t('tasks_added', count=len(self.tasks), batch=self.batch_number))
         layout.addWidget(self.progress_label)
         self.progress_bar = QProgressBar()
         layout.addWidget(self.progress_bar)
 
         # 表格初始化
         self.table = QTableWidget(len(self.tasks), 3)
-        self.table.setHorizontalHeaderLabels(["URL", "进度", "状态"])
+        self.table.setHorizontalHeaderLabels([t('col_url_download'), t('col_progress'), t('col_status')])
         # 设置每列的宽度
         self.table.setColumnWidth(0, 300)  # URL列宽度
         self.table.setColumnWidth(1, 100)  # 进度列宽度
@@ -377,17 +388,17 @@ class DownloadWindow(QDialog):
         for i, task in enumerate(self.tasks):
             self.table.setItem(i, 0, QTableWidgetItem(task['url']))
             self.table.setItem(i, 1, QTableWidgetItem("0%"))
-            self.table.setItem(i, 2, QTableWidgetItem("等待中"))
+            self.table.setItem(i, 2, QTableWidgetItem(t('waiting')))
         layout.addWidget(self.table)
 
         # 开始按钮
-        self.start_button = QPushButton("开始下载")
+        self.start_button = QPushButton(t('start_download'))
         self.start_button.clicked.connect(self.start_download)
         layout.addWidget(self.start_button)
 
         # 批号输入
         batch_layout = QHBoxLayout()
-        batch_label = QLabel("批号:")
+        batch_label = QLabel(t('batch_label'))
         batch_layout.addWidget(batch_label)
         self.batch_input = QLineEdit(self.batch_number)
         self.batch_input.setMaximumWidth(100)
@@ -403,26 +414,26 @@ class DownloadWindow(QDialog):
     def on_batch_changed(self, text):
         """批号改变时更新"""
         self.batch_number = text
-        self.progress_label.setText(f" {len(self.tasks)} 个任务已被添加。当前批号: G{self.batch_number}")
+        self.progress_label.setText(t('tasks_added', count=len(self.tasks), batch=self.batch_number))
 
     def update_start_button_state(self):
         # 检查任务队列是否为空
         self.start_button.setEnabled(any(
-            self.table.item(i, 2).text() not in ["已完成", "任务已取消"] and 
-            not self.table.item(i, 2).text().startswith("下载失败")
+            self.table.item(i, 2).text() not in [t('completed'), t('task_cancelled')] and 
+            not self.table.item(i, 2).text().startswith(t('download_failed', error='').split(':')[0])
             for i in range(self.table.rowCount())
         ))
 
     def start_download(self):
         self.start_button.setEnabled(False)
         self.progress_bar.setValue(0)
-        self.progress_label.setText("正在添加下载任务...")
+        self.progress_label.setText(t('adding_tasks'))
         
         self.batch_input.setEnabled(False)
 
         # 检查 aria2 是否已启动
         if not self.aria2_manager or not self.aria2_manager.api:
-            self.progress_label.setText("aria2c 未启动！")
+            self.progress_label.setText(t('aria2_not_started'))
             return
         
         # 标记已开始下载
@@ -445,7 +456,7 @@ class DownloadWindow(QDialog):
             download = self.aria2_manager.add_download(task['url'], download_dir, task['file_name'])
             
             if download:
-                self.table.setItem(i, 2, QTableWidgetItem("已添加到队列"))
+                self.table.setItem(i, 2, QTableWidgetItem(t('added_to_queue')))
                 # 创建监控器
                 monitor = DownloadMonitor(i, download.gid, self.aria2_manager, task['record_id'], parent=self.parent())
                 monitor.progress.connect(self.update_task_progress)
@@ -453,10 +464,10 @@ class DownloadWindow(QDialog):
                 monitor.finished.connect(self.on_task_finished)
                 self.monitors.append(monitor)
             else:
-                self.table.setItem(i, 2, QTableWidgetItem("添加失败"))
+                self.table.setItem(i, 2, QTableWidgetItem(t('add_failed')))
                 self.completed_count += 1
         
-        self.progress_label.setText(f"下载中... (0/{len(self.tasks)})")
+        self.progress_label.setText(t('downloading_progress', completed=0, total=len(self.tasks)))
 
     def on_task_finished(self, task_id):
         """任务完成回调"""
@@ -486,7 +497,8 @@ class DownloadWindow(QDialog):
         
         for i in range(len(self.tasks)):
             status = self.table.item(i, 2).text()
-            if not status.startswith("下载失败") and status != "添加失败" and status != "任务已取消":
+            # 使用翻译后的文本进行比较
+            if not status.startswith(t('download_failed', error='').split(':')[0]) and status != t('add_failed') and status != t('task_cancelled'):
                 progress_text = self.table.item(i, 1).text().replace("%", "")
                 try:
                     total_progress += int(progress_text)
@@ -497,12 +509,12 @@ class DownloadWindow(QDialog):
         if valid_count > 0:
             overall_progress = int(total_progress / valid_count)
             self.progress_bar.setValue(overall_progress)
-            self.progress_label.setText(f"下载中... ({self.completed_count}/{len(self.tasks)}) - {overall_progress}%")
+            self.progress_label.setText(t('downloading_progress', completed=self.completed_count, total=len(self.tasks)) + f" - {overall_progress}%")
 
     def all_task_done(self):
         """所有任务完成"""
         self.progress_bar.setValue(100)
-        self.progress_label.setText(f"所有下载完成！({self.completed_count}/{len(self.tasks)})")
+        self.progress_label.setText(t('all_downloads_complete', completed=self.completed_count, total=len(self.tasks)))
         
         # 停止所有监控器
         for monitor in self.monitors:

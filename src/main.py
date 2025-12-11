@@ -5,16 +5,21 @@ import json
 from PySide6.QtWidgets import (
 	QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget,
 	QProgressBar, QPushButton, QTableWidget, QTableWidgetItem, QDialog, QHBoxLayout,
-	QMessageBox, QTextEdit, QListWidget, QCheckBox, QProgressDialog, QLineEdit, QFileDialog
+	QMessageBox, QTextEdit, QListWidget, QCheckBox, QProgressDialog, QLineEdit, QFileDialog,
+	QComboBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QByteArray
 from PySide6.QtGui import QScreen, QIcon, QPixmap, QFont
 from tinydb import TinyDB, Query
 from threading import Lock
 from downloader import init_global_aria2_manager, shutdown_global_aria2_manager, load_config, save_config
+from i18n import t, set_language, get_language, get_available_languages
 
 # 全局配置
 config = load_config()
+
+# 初始化语言设置
+set_language(config.get('general', 'language'))
 
 # 初始化数据库（从配置文件读取）
 db = TinyDB(config.get('database', 'main_db'))  # main db
@@ -75,13 +80,13 @@ class JSONProcessorThread(QThread):
 class DeleteConfirmationDialog(QDialog):
 	def __init__(self, records_to_delete, operation_type_text):
 		super().__init__(None)
-		self.setWindowTitle(f"确认{operation_type_text}记录")
+		self.setWindowTitle(t('confirm_operation', operation=operation_type_text))
 
 		# 布局
 		layout = QVBoxLayout()
 
 		# 信息标签
-		info_label = QLabel(f"以下记录将被{operation_type_text}，请确认：")
+		info_label = QLabel(t('records_to_operate', operation=operation_type_text))
 		layout.addWidget(info_label)
 
 		# 列表显示要删除的记录
@@ -91,8 +96,8 @@ class DeleteConfirmationDialog(QDialog):
 		layout.addWidget(self.record_list)
 
 		# 按钮
-		self.confirm_button = QPushButton(f"确认{operation_type_text}")
-		self.cancel_button = QPushButton("取消")
+		self.confirm_button = QPushButton(t('confirm_btn', operation=operation_type_text))
+		self.cancel_button = QPushButton(t('cancel'))
 		layout.addWidget(self.confirm_button)
 		layout.addWidget(self.cancel_button)
 
@@ -105,12 +110,12 @@ class DeleteConfirmationDialog(QDialog):
 class SyncProgressDialog(QDialog):
 	def __init__(self, parent=None):
 		super().__init__(parent)
-		self.setWindowTitle("操作进行中")
+		self.setWindowTitle(t('operation_in_progress'))
 		self.setWindowModality(Qt.ApplicationModal)  # 阻止与其他窗口交互
 		self.setFixedSize(300, 100)
 
 		layout = QVBoxLayout()
-		label = QLabel("请稍候，正在执行操作...")
+		label = QLabel(t('please_wait'))
 		layout.addWidget(label)
 
 		self.progress_bar = QProgressBar()
@@ -163,11 +168,11 @@ class DatabaseViewerDialog(QDialog):
 		self.records = []
 		self.downloaded_files = None
 		self.progress_dialog = None
-		self.setWindowTitle("数据库记录")
+		self.setWindowTitle(t('database_records'))
 		self.resize(900, 400)
 
 		# 添加提示标签
-		self.info_label = QLabel("所有数据可双击复制，但更改不会保存。")
+		self.info_label = QLabel(t('table_hint'))
 		self.info_label.setAlignment(Qt.AlignCenter)
 
 		# 添加提示标签
@@ -178,14 +183,15 @@ class DatabaseViewerDialog(QDialog):
 		self.table = QTableWidget()
 		self.table.setColumnCount(8)
 		self.table.setHorizontalHeaderLabels([
-			"ID", "Created At", "Full Text", "Author", "浏览量", "Url", "已下载", "操作"
+			t('col_id'), t('col_created_at'), t('col_full_text'), t('col_author'), 
+			t('col_views'), t('col_url'), t('col_downloaded'), t('col_actions')
 		])
 
 		# 创建按钮
-		self.refresh_btn = QPushButton("刷新")
-		self.check_image_urls_btn = QPushButton("检查未下载的图片")
-		self.check_video_urls_btn = QPushButton("检查未下载的视频")
-		self.delete_outdated_record_btn = QPushButton("删除不需要的记录")
+		self.refresh_btn = QPushButton(t('refresh'))
+		self.check_image_urls_btn = QPushButton(t('check_undownloaded_images'))
+		self.check_video_urls_btn = QPushButton(t('check_undownloaded_videos'))
+		self.delete_outdated_record_btn = QPushButton(t('delete_outdated_records'))
 
 		# 连接按钮点击事件
 		self.refresh_btn.clicked.connect(self.refresh_table)
@@ -208,12 +214,12 @@ class DatabaseViewerDialog(QDialog):
 		exact_match_enabled = self.config.getboolean('download', 'exact_match', fallback=False)
 		
 		# 创建精准匹配勾选框，并设置初始值（在连接信号之前设置，避免触发刷新）
-		self.exact_match_checkbox = QCheckBox("精准匹配(本地媒体文件名)")
+		self.exact_match_checkbox = QCheckBox(t('exact_match'))
 		self.exact_match_checkbox.setChecked(exact_match_enabled)
 		self.exact_match_checkbox.stateChanged.connect(self.on_exact_match_changed)
 
 		path_layout = QHBoxLayout()
-		path_label = QLabel("媒体扫描路径:")
+		path_label = QLabel(t('media_scan_path'))
 		self.path_input = QLineEdit(self.base_path)
 		# 连接路径变化信号
 		self.path_input.textChanged.connect(self.on_path_changed)
@@ -253,14 +259,13 @@ class DatabaseViewerDialog(QDialog):
 		# 创建一个消息框
 		msg_box = QMessageBox()
 		msg_box.setIcon(QMessageBox.Warning)
-		msg_box.setWindowTitle("删除不需要的记录")
-		msg_box.setText(
-			"你必须要知道你在做什么！\n\n此操作会检索包含未下载媒体的记录。如果你已经下载所有可被下载的媒体，那么剩下的就是失效的推文或你认为不需要的推文。\n\n你可以选择从库中彻底删除记录，或将它们移到另一个文件中：deleted.db\n\n这不是最终决定。在选择处理方式后，我们会收集所有符合条件的失效记录，然后等待你的再次确认。")
+		msg_box.setWindowTitle(t('delete_records_title'))
+		msg_box.setText(t('delete_records_msg'))
 
 		# 添加按钮
-		delete_button = msg_box.addButton("彻底删除记录", QMessageBox.AcceptRole)
-		move_button = msg_box.addButton("移动到 deleted.db", QMessageBox.ActionRole)
-		cancel_button = msg_box.addButton("取消", QMessageBox.RejectRole)
+		delete_button = msg_box.addButton(t('permanently_delete'), QMessageBox.AcceptRole)
+		move_button = msg_box.addButton(t('move_to_deleted'), QMessageBox.ActionRole)
+		cancel_button = msg_box.addButton(t('cancel'), QMessageBox.RejectRole)
 
 		# 设置取消按钮为默认按钮
 		msg_box.setDefaultButton(cancel_button)
@@ -278,10 +283,10 @@ class DatabaseViewerDialog(QDialog):
 		# 收集需要删除的记录
 		records_to_delete = [record for record in self.records if record.get("_need_download") == 1]
 
-		operation_type_text = "删除" if operation_type == "del" else "移动"
+		operation_type_text = t('operation_delete') if operation_type == "del" else t('operation_move')
 
 		if not records_to_delete:
-			QMessageBox.information(None, "提示", f"没有需要{operation_type_text}的记录。")
+			QMessageBox.information(None, t('hint'), t('no_records_to_operate', operation=operation_type_text))
 			return
 
 		# 显示确认窗口
@@ -303,7 +308,7 @@ class DatabaseViewerDialog(QDialog):
 
 	def on_delete_finished(self, count):
 		self.progress_dialog.close()
-		QMessageBox.information(self, "操作完成", f"{count} 条记录已删除")
+		QMessageBox.information(self, t('operation_complete'), t('records_deleted', count=count))
 		self.refresh_table()
 
 	def start_move_records(self):
@@ -316,7 +321,7 @@ class DatabaseViewerDialog(QDialog):
 
 	def on_move_finished(self, count):
 		self.progress_dialog.close()
-		QMessageBox.information(self, "操作完成", f"{count} 条记录已移动到 deleted.db")
+		QMessageBox.information(self, t('operation_complete'), t('records_moved', count=count))
 		self.refresh_table()
 
 	def check_image_urls(self):
@@ -333,7 +338,7 @@ class DatabaseViewerDialog(QDialog):
 		self.download_occurred = False
 
 		self.dialog = QDialog(self)
-		self.dialog.setWindowTitle(f"未下载图片URL ({len(urls)})")
+		self.dialog.setWindowTitle(t('undownloaded_images_title', count=len(urls)))
 		self.dialog.resize(400, 300)
 
 		text_edit = QTextEdit()
@@ -344,14 +349,14 @@ class DatabaseViewerDialog(QDialog):
 		layout.addWidget(text_edit)
 
 		# 创建按钮
-		btn = QPushButton("全部下载")
+		btn = QPushButton(t('download_all'))
 		btn.setAutoDefault(False)
 		btn.setEnabled(bool(urls))
 		btn.clicked.connect(self.download_image_0)
 		layout.addWidget(btn)
 
 		# 创建按钮2
-		btn2 = QPushButton("下载前 100 条")
+		btn2 = QPushButton(t('download_first_100'))
 		btn2.setAutoDefault(False)
 		btn2.setEnabled(bool(urls))
 		btn2.clicked.connect(self.download_image_100)
@@ -410,7 +415,7 @@ class DatabaseViewerDialog(QDialog):
 		self.download_occurred = False
 
 		self.dialog = QDialog(self)
-		self.dialog.setWindowTitle(f"未下载视频URL ({len(urls)})")
+		self.dialog.setWindowTitle(t('undownloaded_videos_title', count=len(urls)))
 		self.dialog.resize(400, 300)
 
 		text_edit = QTextEdit()
@@ -421,7 +426,7 @@ class DatabaseViewerDialog(QDialog):
 		layout.addWidget(text_edit)
 
 		# 创建按钮
-		btn = QPushButton("下载")
+		btn = QPushButton(t('download'))
 		btn.setAutoDefault(False)
 		btn.setEnabled(bool(urls))
 		btn.clicked.connect(self.download_video_wrapper)
@@ -540,9 +545,9 @@ class DatabaseViewerDialog(QDialog):
 						err_video_url_list.append(url)
 
 			# 添加查看和删除按钮
-			view_button = QPushButton("查看")
+			view_button = QPushButton(t('view'))
 			view_button.clicked.connect(lambda _, r=record: self.view_record(r))
-			delete_button = QPushButton("删除")
+			delete_button = QPushButton(t('delete'))
 			delete_button.clicked.connect(lambda _, r=record: self.delete_record(r))
 
 			# 将按钮加入水平布局
@@ -572,43 +577,43 @@ class DatabaseViewerDialog(QDialog):
 			def get_text():
 				if not record.get("media", []):
 					record["_need_download"] = 0
-					return "无媒体"
+					return t('no_media')
 				if media_downloaded:
 					record["_need_download"] = 0
-					return "是"
+					return t('yes')
 				photos_count = len(record.get("_photos", []))
 				videos_count = len(record.get("_videos", []))
 				media_parts = []
 
 				if photos_count > 0:
-					media_parts.append(f"图片{photos_count}张")
+					media_parts.append(t('images_count', count=photos_count))
 				if videos_count > 0:
-					media_parts.append(f"视频{videos_count}条")
+					media_parts.append(t('videos_count', count=videos_count))
 
 				if media_parts:
-					downloaded_status = "未下载(" + " ".join(media_parts) + ")"
+					downloaded_status = t('not_downloaded') + "(" + " ".join(media_parts) + ")"
 				else:
-					downloaded_status = "未下载"
+					downloaded_status = t('not_downloaded')
 
 				return downloaded_status
 
 			self.table.setItem(row, 6, QTableWidgetItem(get_text()))
 
 		# 更新提示标签信息
-		text = f"已归档{len(self.records)}条推文。扫描到{len(photos)}张图片和{len(videos)}条视频。"
+		text = t('archived_stats', tweets=len(self.records), photos=len(photos), videos=len(videos))
 
 		count = sum(1 for record in self.records if record.get("_need_download"))
 
 		if count == 0:
-			text += "所有推文媒体均已下载！"
+			text += t('all_downloaded')
 		else:
-			text += f"{count}条推文包含未下载的媒体。"
+			text += t('tweets_need_download', count=count)
 
 		if self.failed_record_list:
-			text += f"包含{len(self.failed_record_list)}条失效推文。"
+			text += t('invalid_tweets', count=len(self.failed_record_list))
 		failed_num = len(err_photo_url_list) + len(err_video_url_list)
 		if failed_num:
-			text += f"正则匹配失败{failed_num}条。"
+			text += t('regex_failed', count=failed_num)
 		self.info_label2.setText(text)
 		# 数据加载完成，关闭进度对话框
 		if self.progress_dialog:
@@ -617,7 +622,7 @@ class DatabaseViewerDialog(QDialog):
 	def view_record(self, record):
 		# 过滤掉以 _ 开头的键, 因为这是python的内部临时状态标记，不是原始推文数据
 		filtered_record = {k: v for k, v in record.items() if not k.startswith('_')}
-		self.view_text("查看记录", json.dumps(filtered_record, indent=4, ensure_ascii=False))
+		self.view_text(t('view_record'), json.dumps(filtered_record, indent=4, ensure_ascii=False))
 
 	def view_text(self, title, text):
 		# 查看记录的窗口
@@ -637,7 +642,7 @@ class DatabaseViewerDialog(QDialog):
 	def delete_record(self, record):
 		# 删除记录确认
 		reply = QMessageBox.question(
-			self, "删除确认", "确定要删除该记录吗？",
+			self, t('delete_confirm_title'), t('delete_confirm_msg'),
 			QMessageBox.Yes | QMessageBox.No, QMessageBox.No
 		)
 		if reply == QMessageBox.Yes:
@@ -657,60 +662,78 @@ class DatabaseViewerDialog(QDialog):
 
 	def show_loading_indicator(self):
 		# 创建进度对话框
-		self.progress_dialog = QProgressDialog("正在加载数据...", None, 0, 0, self)
+		self.progress_dialog = QProgressDialog(t('loading_data'), None, 0, 0, self)
 		self.progress_dialog.setWindowModality(Qt.ApplicationModal)
 		self.progress_dialog.setCancelButton(None)
-		self.progress_dialog.setWindowTitle("请稍候")
+		self.progress_dialog.setWindowTitle(t('please_wait_title'))
 		self.progress_dialog.show()
 
 
 class MainWindow(QMainWindow):
 	def __init__(self):
 		super().__init__()
-		self.setWindowTitle("twegui v0.1.0")
-		self.resize(500, 350)
+		self.setWindowTitle(t('app_title'))
+		self.resize(500, 380)
 		self.center_window()
 
 		# 加载配置
 		self.config = load_config()
 
+		# 语言选择控件
+		lang_layout = QHBoxLayout()
+		lang_label = QLabel(t('language'))
+		self.lang_combo = QComboBox()
+		available_langs = get_available_languages()
+		for lang_code, lang_name in available_langs.items():
+			self.lang_combo.addItem(lang_name, lang_code)
+		# 设置当前语言
+		current_lang = get_language()
+		index = self.lang_combo.findData(current_lang)
+		if index >= 0:
+			self.lang_combo.setCurrentIndex(index)
+		self.lang_combo.currentIndexChanged.connect(self.on_language_changed)
+		lang_layout.addWidget(lang_label)
+		lang_layout.addWidget(self.lang_combo)
+		lang_layout.addStretch()
+
 		# 初始化 aria2 管理器
-		self.aria2_status_label = QLabel("正在启动 aria2c...")
+		self.aria2_status_label = QLabel(t('starting_aria2'))
 		self.aria2_status_label.setAlignment(Qt.AlignCenter)
 
-		self.label = QLabel("拖放一个 JSON 文件到窗口")
+		self.label = QLabel(t('drop_json_hint'))
 		self.label.setAlignment(Qt.AlignCenter)
 		self.progress_bar = QProgressBar()
 		self.progress_bar.setValue(0)
 		self.progress_bar.setVisible(False)
-		self.open_db_button = QPushButton("查看数据库记录")
+		self.open_db_button = QPushButton(t('view_database'))
 		self.open_db_button.clicked.connect(self.open_database_viewer)
 
 		# 数据库文件选择控件
 		db_layout = QHBoxLayout()
-		db_label = QLabel("主数据库:")
+		self.db_label = QLabel(t('main_db_label'))
 		self.db_path_label = QLabel(self.config.get('database', 'main_db'))
 		self.db_path_label.setStyleSheet("color: blue;")
-		self.db_select_button = QPushButton("切换...")
+		self.db_select_button = QPushButton(t('switch_btn'))
 		self.db_select_button.clicked.connect(self.select_main_db)
-		db_layout.addWidget(db_label)
+		db_layout.addWidget(self.db_label)
 		db_layout.addWidget(self.db_path_label)
 		db_layout.addWidget(self.db_select_button)
 		db_layout.addStretch()
 
 		# deleted 数据库文件选择控件
 		ddb_layout = QHBoxLayout()
-		ddb_label = QLabel("删除库:")
+		self.ddb_label = QLabel(t('deleted_db_label'))
 		self.ddb_path_label = QLabel(self.config.get('database', 'deleted_db'))
 		self.ddb_path_label.setStyleSheet("color: blue;")
-		self.ddb_select_button = QPushButton("切换...")
+		self.ddb_select_button = QPushButton(t('switch_btn'))
 		self.ddb_select_button.clicked.connect(self.select_deleted_db)
-		ddb_layout.addWidget(ddb_label)
+		ddb_layout.addWidget(self.ddb_label)
 		ddb_layout.addWidget(self.ddb_path_label)
 		ddb_layout.addWidget(self.ddb_select_button)
 		ddb_layout.addStretch()
 
 		layout = QVBoxLayout()
+		layout.addLayout(lang_layout)
 		layout.addWidget(self.aria2_status_label)
 		layout.addLayout(db_layout)
 		layout.addLayout(ddb_layout)
@@ -728,6 +751,35 @@ class MainWindow(QMainWindow):
 		# 延迟启动 aria2（避免阻塞 UI）
 		QTimer.singleShot(500, self.init_aria2)
 
+	def on_language_changed(self, index):
+		"""语言切换事件"""
+		lang_code = self.lang_combo.itemData(index)
+		set_language(lang_code)
+		# 保存到配置
+		self.config.set('general', 'language', lang_code)
+		save_config(self.config)
+		# 刷新界面文本
+		self.refresh_ui_text()
+
+	def refresh_ui_text(self):
+		"""刷新界面文本"""
+		self.setWindowTitle(t('app_title'))
+		self.label.setText(t('drop_json_hint'))
+		self.open_db_button.setText(t('view_database'))
+		self.db_label.setText(t('main_db_label'))
+		self.ddb_label.setText(t('deleted_db_label'))
+		self.db_select_button.setText(t('switch_btn'))
+		self.ddb_select_button.setText(t('switch_btn'))
+		# 更新 aria2 状态
+		if self.aria2_status_label.styleSheet() == "color: green;":
+			self.aria2_status_label.setText(t('aria2_started'))
+		elif self.aria2_status_label.styleSheet() == "color: red;":
+			self.aria2_status_label.setText(t('aria2_failed'))
+		else:
+			self.aria2_status_label.setText(t('starting_aria2'))
+		# 更新语言标签
+		# 注意：语言下拉框本身不需要更新，因为语言名称是固定的
+
 	def center_window(self):
 		screen = QScreen.availableGeometry(QApplication.primaryScreen())
 		x = (screen.width() - self.width()) // 2
@@ -738,10 +790,10 @@ class MainWindow(QMainWindow):
 		"""初始化 aria2 守护进程"""
 		aria2_manager = init_global_aria2_manager()
 		if aria2_manager and aria2_manager.api:
-			self.aria2_status_label.setText("aria2c 已启动")
+			self.aria2_status_label.setText(t('aria2_started'))
 			self.aria2_status_label.setStyleSheet("color: green;")
 		else:
-			self.aria2_status_label.setText("aria2c 启动失败（下载功能不可用）")
+			self.aria2_status_label.setText(t('aria2_failed'))
 			self.aria2_status_label.setStyleSheet("color: red;")
 
 	def closeEvent(self, event):
@@ -763,7 +815,7 @@ class MainWindow(QMainWindow):
 			if file_path.endswith(".json"):
 				self.process_json(file_path)
 			else:
-				self.label.setText("请拖放一个 JSON 文件")
+				self.label.setText(t('drop_json_file'))
 
 	def process_json(self, file_path):
 		self.thread = JSONProcessorThread(file_path)
@@ -772,7 +824,7 @@ class MainWindow(QMainWindow):
 
 		self.progress_bar.setValue(0)
 		self.progress_bar.setVisible(True)
-		self.label.setText("正在处理 JSON 文件...")
+		self.label.setText(t('processing_json'))
 
 		self.thread.start()
 
@@ -782,17 +834,17 @@ class MainWindow(QMainWindow):
 	def on_processing_completed(self, new_entries):
 		self.progress_bar.setVisible(False)
 		if new_entries == -1:
-			self.label.setText("JSON 文件内容格式错误或读取失败")
+			self.label.setText(t('json_error'))
 		else:
-			self.label.setText(f"处理完成，新添加了 {new_entries} 条记录")
+			self.label.setText(t('process_complete', count=new_entries))
 
 	def select_main_db(self):
 		"""选择主数据库文件"""
 		file_path, _ = QFileDialog.getSaveFileName(
 			self,
-			"选择或创建主数据库文件",
+			t('select_main_db_title'),
 			os.getcwd(),
-			"数据库文件 (*.db);;所有文件 (*.*)"
+			t('db_filter')
 		)
 		
 		if file_path:
@@ -814,17 +866,17 @@ class MainWindow(QMainWindow):
 			
 			# 判断是新建还是打开
 			if os.path.exists(file_path):
-				QMessageBox.information(self, "切换成功", f"已切换到数据库: {file_path}")
+				QMessageBox.information(self, t('switch_success'), t('switched_to_db', path=file_path))
 			else:
-				QMessageBox.information(self, "创建成功", f"已创建并切换到新数据库: {file_path}")
+				QMessageBox.information(self, t('create_success'), t('created_db', path=file_path))
 	
 	def select_deleted_db(self):
 		"""选择删除数据库文件"""
 		file_path, _ = QFileDialog.getSaveFileName(
 			self,
-			"选择或创建删除数据库文件",
+			t('select_deleted_db_title'),
 			os.getcwd(),
-			"数据库文件 (*.db);;所有文件 (*.*)"
+			t('db_filter')
 		)
 		
 		if file_path:
@@ -846,9 +898,9 @@ class MainWindow(QMainWindow):
 			
 			# 判断是新建还是打开
 			if os.path.exists(file_path):
-				QMessageBox.information(self, "切换成功", f"已切换到数据库: {file_path}")
+				QMessageBox.information(self, t('switch_success'), t('switched_to_db', path=file_path))
 			else:
-				QMessageBox.information(self, "创建成功", f"已创建并切换到新数据库: {file_path}")
+				QMessageBox.information(self, t('create_success'), t('created_db', path=file_path))
 
 	def open_database_viewer(self):
 		self.db_viewer = DatabaseViewerDialog()
