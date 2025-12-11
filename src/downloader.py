@@ -290,10 +290,10 @@ def load_config():
         config.add_section('database')
     
     if not config.has_option('database', 'main_db'):
-        config.set('database', 'main_db', 'a.db')
+        config.set('database', 'main_db', 'a.sqlite')
     
     if not config.has_option('database', 'deleted_db'):
-        config.set('database', 'deleted_db', 'deleted.db')
+        config.set('database', 'deleted_db', 'deleted.sqlite')
     
     return config
 

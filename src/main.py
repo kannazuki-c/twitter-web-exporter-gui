@@ -5,20 +5,46 @@ import json
 from PySide6.QtWidgets import (
 	QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget,
 	QProgressBar, QPushButton, QTableWidget, QTableWidgetItem, QDialog, QHBoxLayout,
-	QMessageBox, QTextEdit, QListWidget, QCheckBox, QProgressDialog, QLineEdit, QFileDialog
+	QMessageBox, QTextEdit, QListWidget, QCheckBox, QProgressDialog, QLineEdit, QFileDialog,
+	QGroupBox, QComboBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QByteArray
 from PySide6.QtGui import QScreen, QIcon, QPixmap, QFont
-from tinydb import TinyDB, Query
 from threading import Lock
 from downloader import init_global_aria2_manager, shutdown_global_aria2_manager, load_config, save_config
+from database import TweetDatabase, MigrationHelper, is_tinydb_file, is_sqlite_db
 
 # 全局配置
 config = load_config()
 
-# 初始化数据库（从配置文件读取）
-db = TinyDB(config.get('database', 'main_db'))  # main db
-ddb = TinyDB(config.get('database', 'deleted_db'))  # deleted db
+# 初始化数据库（从配置文件读取）- 使用 SQLite
+# 如果配置的数据库文件扩展名是 .db 但内容是 TinyDB 格式，提示用户迁移
+main_db_path = config.get('database', 'main_db')
+deleted_db_path = config.get('database', 'deleted_db')
+
+# 自动将 .db 扩展名的 SQLite 数据库改为 .sqlite
+def get_sqlite_path(path):
+	"""获取 SQLite 数据库路径（扩展名为 .sqlite）"""
+	base, ext = os.path.splitext(path)
+	if ext.lower() == '.db':
+		return base + '.sqlite'
+	return path
+
+# 如果是旧的 TinyDB 文件，使用新的 SQLite 路径
+if is_tinydb_file(main_db_path):
+	# 保持旧路径以便迁移，使用新路径创建 SQLite 数据库
+	main_db_path = get_sqlite_path(main_db_path)
+elif not os.path.exists(main_db_path):
+	# 新建数据库时使用 .sqlite 扩展名
+	main_db_path = get_sqlite_path(main_db_path)
+
+if is_tinydb_file(deleted_db_path):
+	deleted_db_path = get_sqlite_path(deleted_db_path)
+elif not os.path.exists(deleted_db_path):
+	deleted_db_path = get_sqlite_path(deleted_db_path)
+
+db = TweetDatabase(main_db_path)  # main db (SQLite)
+ddb = TweetDatabase(deleted_db_path)  # deleted db (SQLite)
 
 
 class JSONProcessorThread(QThread):
@@ -31,13 +57,8 @@ class JSONProcessorThread(QThread):
 
 	def run(self):
 		try:
-			# 1) 预加载 main db 与 deleted db 的所有 id（保证性能：集合 O(1) 查询）
-			existing_ids = set()
-			for store in (db, ddb):
-				for rec in store.all():
-					_id = rec.get('id')
-					if _id is not None:
-						existing_ids.add(_id)
+			# 1) 预加载 main db 与 deleted db 的所有 id（使用高性能方法）
+			existing_ids = db.get_all_ids() | ddb.get_all_ids()
 
 			# 2) 读取 JSON 文件
 			with open(self.file_path, "r", encoding="utf-8") as f:
@@ -130,31 +151,40 @@ class DeleteRecordsThread(QThread):
 
 	def run(self):
 		need_delete_record_ids = [
-			record.doc_id for record in self.records if record.get("_need_download") == 1
+			record.get('doc_id') for record in self.records if record.get("_need_download") == 1
 		]
-		for record_id in need_delete_record_ids:
-			self.db.remove(doc_ids=[record_id])
+		# 批量删除
+		if need_delete_record_ids:
+			self.db.remove(doc_ids=need_delete_record_ids)
 
 		self.finished.emit(len(need_delete_record_ids))  # 发送删除数量
 
 class MoveRecordsThread(QThread):
 	finished = Signal(int)  # 传递移动的记录数量
 
-	def __init__(self, records, main_db, deleted_db_path='deleted.db'):
+	def __init__(self, records, main_db, deleted_db):
 		super().__init__()
 		self.records = records
 		self.main_db = main_db
-		self.deleted_db = TinyDB(deleted_db_path)
+		self.deleted_db = deleted_db
 
 	def run(self):
 		need_move_records = [
 			record for record in self.records if record.get("_need_download") == 1
 		]
-		self.deleted_db.insert_multiple(need_move_records[::-1])
+		
+		# 清理临时字段后插入到删除数据库
+		clean_records = []
+		for record in need_move_records:
+			clean_record = {k: v for k, v in record.items() if not k.startswith('_') and k != 'doc_id'}
+			clean_records.append(clean_record)
+		
+		self.deleted_db.insert_multiple(clean_records[::-1])
 
-		need_move_record_ids = [record.doc_id for record in need_move_records]
-		for record_id in need_move_record_ids:
-			self.main_db.remove(doc_ids=[record_id])
+		# 批量删除
+		need_move_record_ids = [record.get('doc_id') for record in need_move_records]
+		if need_move_record_ids:
+			self.main_db.remove(doc_ids=need_move_record_ids)
 
 		self.finished.emit(len(need_move_records))  # 发送移动数量
 
@@ -256,11 +286,11 @@ class DatabaseViewerDialog(QDialog):
 		msg_box.setIcon(QMessageBox.Warning)
 		msg_box.setWindowTitle("删除不需要的记录")
 		msg_box.setText(
-			"你必须要知道你在做什么！\n\n此操作会检索包含未下载媒体的记录。如果你已经下载所有可被下载的媒体，那么剩下的就是失效的推文或你认为不需要的推文。\n\n你可以选择从库中彻底删除记录，或将它们移到另一个文件中：deleted.db\n\n这不是最终决定。在选择处理方式后，我们会收集所有符合条件的失效记录，然后等待你的再次确认。")
+			"你必须要知道你在做什么！\n\n此操作会检索包含未下载媒体的记录。如果你已经下载所有可被下载的媒体，那么剩下的就是失效的推文或你认为不需要的推文。\n\n你可以选择从库中彻底删除记录，或将它们移到删除库中。\n\n这不是最终决定。在选择处理方式后，我们会收集所有符合条件的失效记录，然后等待你的再次确认。")
 
 		# 添加按钮
 		delete_button = msg_box.addButton("彻底删除记录", QMessageBox.AcceptRole)
-		move_button = msg_box.addButton("移动到 deleted.db", QMessageBox.ActionRole)
+		move_button = msg_box.addButton("移动到删除库", QMessageBox.ActionRole)
 		cancel_button = msg_box.addButton("取消", QMessageBox.RejectRole)
 
 		# 设置取消按钮为默认按钮
@@ -311,13 +341,13 @@ class DatabaseViewerDialog(QDialog):
 		self.progress_dialog = SyncProgressDialog(self)
 		self.progress_dialog.show()
 
-		self.move_thread = MoveRecordsThread(self.records, db)
+		self.move_thread = MoveRecordsThread(self.records, db, ddb)
 		self.move_thread.finished.connect(self.on_move_finished)
 		self.move_thread.start()
 
 	def on_move_finished(self, count):
 		self.progress_dialog.close()
-		QMessageBox.information(self, "操作完成", f"{count} 条记录已移动到 deleted.db")
+		QMessageBox.information(self, "操作完成", f"{count} 条记录已移动到删除库")
 		self.refresh_table()
 
 	def check_image_urls(self):
@@ -650,7 +680,7 @@ class DatabaseViewerDialog(QDialog):
 			QMessageBox.Yes | QMessageBox.No, QMessageBox.No
 		)
 		if reply == QMessageBox.Yes:
-			db.remove(Query().id == record['id'])
+			db.remove(tweet_id=record['id'])
 			self.refresh_table()  # 删除后刷新表格
 
 	def refresh_table(self):
@@ -673,11 +703,190 @@ class DatabaseViewerDialog(QDialog):
 		self.progress_dialog.show()
 
 
+class MigrationThread(QThread):
+	"""数据迁移线程"""
+	progress = Signal(int, int)  # current, total
+	completed = Signal(int, int, int)  # migrated, skipped, errors
+
+	def __init__(self, tinydb_path, sqlite_db):
+		super().__init__()
+		self.tinydb_path = tinydb_path
+		self.sqlite_db = sqlite_db
+
+	def run(self):
+		try:
+			migrated, skipped, errors = MigrationHelper.migrate_from_tinydb(
+				self.tinydb_path,
+				self.sqlite_db,
+				progress_callback=lambda c, t: self.progress.emit(c, t)
+			)
+			self.completed.emit(migrated, skipped, errors)
+		except Exception as e:
+			print(f"迁移失败: {e}")
+			self.completed.emit(-1, -1, -1)
+
+
+class MigrationDialog(QDialog):
+	"""数据迁移对话框"""
+	def __init__(self, parent=None):
+		super().__init__(parent)
+		self.setWindowTitle("从旧数据迁移 (TinyDB → SQLite)")
+		self.setMinimumWidth(500)
+		self.migration_thread = None
+		
+		layout = QVBoxLayout()
+		
+		# 说明标签
+		info_label = QLabel(
+			"此功能可以将旧版本使用的 TinyDB 数据库（JSON 格式）\n"
+			"迁移到新的 SQLite 数据库，以获得更好的性能。"
+		)
+		info_label.setWordWrap(True)
+		layout.addWidget(info_label)
+		
+		# TinyDB 文件选择
+		source_group = QGroupBox("选择要迁移的 TinyDB 文件")
+		source_layout = QVBoxLayout()
+		
+		# 自动检测
+		self.detected_files = MigrationHelper.detect_tinydb_files()
+		
+		if self.detected_files:
+			self.source_combo = QComboBox()
+			for f in self.detected_files:
+				self.source_combo.addItem(os.path.basename(f), f)
+			source_layout.addWidget(self.source_combo)
+		else:
+			self.source_combo = None
+			no_file_label = QLabel("未检测到 TinyDB 文件")
+			source_layout.addWidget(no_file_label)
+		
+		# 手动选择按钮
+		self.browse_btn = QPushButton("浏览...")
+		self.browse_btn.clicked.connect(self.browse_source)
+		source_layout.addWidget(self.browse_btn)
+		
+		self.source_path_label = QLabel("")
+		self.source_path_label.setStyleSheet("color: gray;")
+		source_layout.addWidget(self.source_path_label)
+		
+		source_group.setLayout(source_layout)
+		layout.addWidget(source_group)
+		
+		# 目标数据库选择
+		target_group = QGroupBox("目标 SQLite 数据库")
+		target_layout = QVBoxLayout()
+		
+		self.target_combo = QComboBox()
+		self.target_combo.addItem("主数据库 (main)", "main")
+		self.target_combo.addItem("删除库 (deleted)", "deleted")
+		target_layout.addWidget(self.target_combo)
+		
+		target_group.setLayout(target_layout)
+		layout.addWidget(target_group)
+		
+		# 进度条
+		self.progress_bar = QProgressBar()
+		self.progress_bar.setVisible(False)
+		layout.addWidget(self.progress_bar)
+		
+		# 状态标签
+		self.status_label = QLabel("")
+		layout.addWidget(self.status_label)
+		
+		# 按钮
+		btn_layout = QHBoxLayout()
+		self.migrate_btn = QPushButton("开始迁移")
+		self.migrate_btn.clicked.connect(self.start_migration)
+		self.close_btn = QPushButton("关闭")
+		self.close_btn.clicked.connect(self.close)
+		btn_layout.addWidget(self.migrate_btn)
+		btn_layout.addWidget(self.close_btn)
+		layout.addLayout(btn_layout)
+		
+		self.setLayout(layout)
+		self.custom_source_path = None
+	
+	def browse_source(self):
+		"""浏览选择源文件"""
+		file_path, _ = QFileDialog.getOpenFileName(
+			self,
+			"选择 TinyDB 数据库文件",
+			os.getcwd(),
+			"数据库文件 (*.db);;所有文件 (*.*)"
+		)
+		if file_path:
+			self.custom_source_path = file_path
+			self.source_path_label.setText(f"已选择: {file_path}")
+	
+	def get_source_path(self):
+		"""获取源文件路径"""
+		if self.custom_source_path:
+			return self.custom_source_path
+		if self.source_combo and self.source_combo.currentData():
+			return self.source_combo.currentData()
+		return None
+	
+	def start_migration(self):
+		"""开始迁移"""
+		source_path = self.get_source_path()
+		if not source_path:
+			QMessageBox.warning(self, "错误", "请选择要迁移的 TinyDB 文件")
+			return
+		
+		if not os.path.exists(source_path):
+			QMessageBox.warning(self, "错误", f"文件不存在: {source_path}")
+			return
+		
+		if not is_tinydb_file(source_path):
+			QMessageBox.warning(self, "错误", "所选文件不是有效的 TinyDB 数据库文件")
+			return
+		
+		# 确定目标数据库
+		target = self.target_combo.currentData()
+		target_db = db if target == "main" else ddb
+		
+		# 开始迁移
+		self.migrate_btn.setEnabled(False)
+		self.progress_bar.setVisible(True)
+		self.progress_bar.setValue(0)
+		self.status_label.setText("正在迁移...")
+		
+		self.migration_thread = MigrationThread(source_path, target_db)
+		self.migration_thread.progress.connect(self.on_progress)
+		self.migration_thread.completed.connect(self.on_completed)
+		self.migration_thread.start()
+	
+	def on_progress(self, current, total):
+		"""更新进度"""
+		if total > 0:
+			self.progress_bar.setValue(int(current * 100 / total))
+			self.status_label.setText(f"正在迁移... ({current}/{total})")
+	
+	def on_completed(self, migrated, skipped, errors):
+		"""迁移完成"""
+		self.migrate_btn.setEnabled(True)
+		self.progress_bar.setValue(100)
+		
+		if migrated == -1:
+			self.status_label.setText("迁移失败，请检查文件格式")
+			QMessageBox.critical(self, "错误", "迁移失败，请确保已安装 tinydb 库并且文件格式正确")
+		else:
+			self.status_label.setText(f"迁移完成！成功: {migrated}, 跳过: {skipped}, 错误: {errors}")
+			QMessageBox.information(
+				self, "迁移完成",
+				f"数据迁移已完成！\n\n"
+				f"成功迁移: {migrated} 条记录\n"
+				f"跳过（已存在）: {skipped} 条记录\n"
+				f"错误: {errors} 条记录"
+			)
+
+
 class MainWindow(QMainWindow):
 	def __init__(self):
 		super().__init__()
-		self.setWindowTitle("twegui v0.1.0")
-		self.resize(500, 350)
+		self.setWindowTitle("twegui v0.1.1")
+		self.resize(500, 400)
 		self.center_window()
 
 		# 加载配置
@@ -698,7 +907,7 @@ class MainWindow(QMainWindow):
 		# 数据库文件选择控件
 		db_layout = QHBoxLayout()
 		db_label = QLabel("主数据库:")
-		self.db_path_label = QLabel(self.config.get('database', 'main_db'))
+		self.db_path_label = QLabel(main_db_path)
 		self.db_path_label.setStyleSheet("color: blue;")
 		self.db_select_button = QPushButton("切换...")
 		self.db_select_button.clicked.connect(self.select_main_db)
@@ -710,7 +919,7 @@ class MainWindow(QMainWindow):
 		# deleted 数据库文件选择控件
 		ddb_layout = QHBoxLayout()
 		ddb_label = QLabel("删除库:")
-		self.ddb_path_label = QLabel(self.config.get('database', 'deleted_db'))
+		self.ddb_path_label = QLabel(deleted_db_path)
 		self.ddb_path_label.setStyleSheet("color: blue;")
 		self.ddb_select_button = QPushButton("切换...")
 		self.ddb_select_button.clicked.connect(self.select_deleted_db)
@@ -719,12 +928,17 @@ class MainWindow(QMainWindow):
 		ddb_layout.addWidget(self.ddb_select_button)
 		ddb_layout.addStretch()
 
+		# 数据迁移按钮
+		self.migrate_button = QPushButton("从旧数据迁移 (TinyDB → SQLite)")
+		self.migrate_button.clicked.connect(self.open_migration_dialog)
+
 		layout = QVBoxLayout()
 		layout.addWidget(self.aria2_status_label)
 		layout.addLayout(db_layout)
 		layout.addLayout(ddb_layout)
 		layout.addWidget(self.label)
 		layout.addWidget(self.progress_bar)
+		layout.addWidget(self.migrate_button)
 		layout.addWidget(self.open_db_button)
 
 		container = QWidget()
@@ -736,6 +950,9 @@ class MainWindow(QMainWindow):
 
 		# 延迟启动 aria2（避免阻塞 UI）
 		QTimer.singleShot(500, self.init_aria2)
+		
+		# 检查是否有旧数据需要迁移
+		QTimer.singleShot(1000, self.check_migration_needed)
 
 	def center_window(self):
 		screen = QScreen.availableGeometry(QApplication.primaryScreen())
@@ -801,18 +1018,18 @@ class MainWindow(QMainWindow):
 			self,
 			"选择或创建主数据库文件",
 			os.getcwd(),
-			"数据库文件 (*.db);;所有文件 (*.*)"
+			"SQLite数据库 (*.sqlite);;所有文件 (*.*)"
 		)
 		
 		if file_path:
-			# 如果用户没有输入扩展名，自动添加 .db
-			if not file_path.endswith('.db'):
-				file_path += '.db'
+			# 如果用户没有输入扩展名，自动添加 .sqlite
+			if not file_path.endswith('.sqlite'):
+				file_path += '.sqlite'
 			
 			# 更新全局数据库实例
 			global db
 			db.close()
-			db = TinyDB(file_path)
+			db = TweetDatabase(file_path)
 			
 			# 保存到配置
 			self.config.set('database', 'main_db', file_path)
@@ -833,18 +1050,18 @@ class MainWindow(QMainWindow):
 			self,
 			"选择或创建删除数据库文件",
 			os.getcwd(),
-			"数据库文件 (*.db);;所有文件 (*.*)"
+			"SQLite数据库 (*.sqlite);;所有文件 (*.*)"
 		)
 		
 		if file_path:
-			# 如果用户没有输入扩展名，自动添加 .db
-			if not file_path.endswith('.db'):
-				file_path += '.db'
+			# 如果用户没有输入扩展名，自动添加 .sqlite
+			if not file_path.endswith('.sqlite'):
+				file_path += '.sqlite'
 			
 			# 更新全局数据库实例
 			global ddb
 			ddb.close()
-			ddb = TinyDB(file_path)
+			ddb = TweetDatabase(file_path)
 			
 			# 保存到配置
 			self.config.set('database', 'deleted_db', file_path)
@@ -858,6 +1075,36 @@ class MainWindow(QMainWindow):
 				QMessageBox.information(self, "切换成功", f"已切换到数据库: {file_path}")
 			else:
 				QMessageBox.information(self, "创建成功", f"已创建并切换到新数据库: {file_path}")
+
+	def check_migration_needed(self):
+		"""检查是否有旧数据需要迁移"""
+		old_main_db = self.config.get('database', 'main_db')
+		old_deleted_db = self.config.get('database', 'deleted_db')
+		
+		tinydb_files = []
+		if is_tinydb_file(old_main_db):
+			tinydb_files.append(old_main_db)
+		if is_tinydb_file(old_deleted_db):
+			tinydb_files.append(old_deleted_db)
+		
+		if tinydb_files:
+			reply = QMessageBox.question(
+				self,
+				"检测到旧数据",
+				f"检测到以下 TinyDB 格式的数据库文件:\n\n"
+				f"{chr(10).join(tinydb_files)}\n\n"
+				f"新版本使用 SQLite 数据库以提升性能。\n"
+				f"是否现在迁移数据？",
+				QMessageBox.Yes | QMessageBox.No,
+				QMessageBox.Yes
+			)
+			if reply == QMessageBox.Yes:
+				self.open_migration_dialog()
+
+	def open_migration_dialog(self):
+		"""打开数据迁移对话框"""
+		dialog = MigrationDialog(self)
+		dialog.exec()
 
 	def open_database_viewer(self):
 		self.db_viewer = DatabaseViewerDialog()
