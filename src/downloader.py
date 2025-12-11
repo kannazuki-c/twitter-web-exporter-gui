@@ -280,7 +280,7 @@ def load_config():
         config.set('download', 'batch_number', '1')
     
     if not config.has_option('download', 'base_path'):
-        config.set('download', 'base_path', os.path.join(os.getcwd(), "download"))
+        config.set('download', 'base_path', os.path.join(os.getcwd(), "downloads"))
     
     if not config.has_option('download', 'exact_match'):
         config.set('download', 'exact_match', 'False')
