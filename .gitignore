@@ -4,3 +4,9 @@
 /.idea
 /dist/
 /build/
+/src/downloads/
+/src/profile_images/
+/src/restore_point/
+*.db
+*.sqlite
+*.ini

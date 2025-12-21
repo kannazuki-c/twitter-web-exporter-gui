@@ -5,7 +5,11 @@ a = Analysis(
     ['src\\main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[('src\\aria2-1.37.0-win-64bit', 'aria2-1.37.0-win-64bit')],
+    datas=[
+        ('src\\aria2-1.37.0-win-64bit', 'aria2-1.37.0-win-64bit'),
+        ('app.ico', '.'),
+        ('src\\web', 'web'),
+    ],
     hiddenimports=['downloader'],
     hookspath=[],
     hooksconfig={},

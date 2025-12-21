@@ -1,0 +1,1732 @@
+<!DOCTYPE html>
+<html lang="{{ current_lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TWEGUI Web App</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- HTMX CDN -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <!-- Alpine.js CDN -->
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- PhotoSwipe CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/photoswipe@5.4.4/dist/photoswipe.css">
+    <style>
+        /* 禁止水平滚动和过度滚动效果 */
+        html {
+            overflow-x: hidden;
+            overscroll-behavior-x: none;
+        }
+        
+        body {
+            overflow-x: clip;
+            overscroll-behavior-x: none;
+        }
+        
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a2e;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4a4a6a;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5a5a7a;
+        }
+        
+        /* 加载动画 */
+        .loading-spinner {
+            border: 3px solid #3b82f6;
+            border-top: 3px solid transparent;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 视频自适应 */
+        video {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        /* 链接样式 */
+        .tweet-text a {
+            color: #60a5fa;
+            text-decoration: none;
+        }
+        .tweet-text a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 防止 Alpine.js 初始化前元素闪烁 */
+        [x-cloak] {
+            display: none !important;
+        }
+        
+        /* 模态框打开时禁止背景滚动 */
+        html.modal-open {
+            overflow: hidden !important;
+        }
+        html.modal-open body {
+            overflow: hidden !important;
+            position: relative;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen" x-data="tweetApp()">
+    <!-- 顶部导航栏 -->
+    <header class="bg-gray-800 border-b border-gray-700 sticky top-0 z-40">
+        <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+            <button @click="goToPage(1)" class="text-xl font-bold text-blue-400 hover:text-blue-300 transition-colors cursor-pointer">TWEGUI</button>
+            <div class="flex items-center space-x-3">
+                <!-- 快速翻页按钮 -->
+                <div x-show="!loading && (totalPages > 1 || isSearchMode || isFilterMode)" class="flex items-center space-x-1">
+                    <!-- 搜索按钮 -->
+                    <button @click="openSearchDialog()"
+                            class="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-600 transition-colors"
+                            :class="{'ring-2 ring-blue-500': isSearchMode || isFilterMode}"
+                            :title="getTranslation('web_search')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </button>
+                    <!-- 更多菜单按钮 -->
+                    <div class="relative" x-data="{ moreMenuOpen: false }">
+                        <button @click="moreMenuOpen = !moreMenuOpen"
+                                @click.away="moreMenuOpen = false"
+                                class="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-600 transition-colors"
+                                title="More">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <circle cx="12" cy="5" r="2"></circle>
+                                <circle cx="12" cy="12" r="2"></circle>
+                                <circle cx="12" cy="19" r="2"></circle>
+                            </svg>
+                        </button>
+                        <!-- 下拉菜单 -->
+                        <div x-show="moreMenuOpen" 
+                             x-transition:enter="transition ease-out duration-100"
+                             x-transition:enter-start="transform opacity-0 scale-95"
+                             x-transition:enter-end="transform opacity-100 scale-100"
+                             x-transition:leave="transition ease-in duration-75"
+                             x-transition:leave-start="transform opacity-100 scale-100"
+                             x-transition:leave-end="transform opacity-0 scale-95"
+                             class="absolute right-0 top-full mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-50 overflow-hidden">
+                            <button @click="reloadServer(); moreMenuOpen = false"
+                                    :disabled="isReloading"
+                                    class="w-full px-4 py-2.5 text-left text-sm text-gray-200 hover:bg-gray-700 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                                <svg class="w-4 h-4" :class="{'animate-spin': isReloading}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                                <span x-text="isReloading ? getTranslation('web_reloading') : getTranslation('web_reload_server')"></span>
+                            </button>
+                        </div>
+                    </div>
+                    <button x-show="totalPages > 1" @click="goToPage(currentPage - 1)" 
+                            :disabled="!hasPrev"
+                            :class="{'opacity-50 cursor-not-allowed': !hasPrev}"
+                            class="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-600 transition-colors disabled:hover:bg-gray-700"
+                            title="上一页">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                    </button>
+                    <!-- 页数显示 -->
+                    <span x-show="totalPages > 1" class="text-xs text-gray-400 min-w-[3rem] text-center" x-text="currentPage + '/' + totalPages"></span>
+                    <button x-show="totalPages > 1" @click="goToPage(currentPage + 1)" 
+                            :disabled="!hasNext"
+                            :class="{'opacity-50 cursor-not-allowed': !hasNext}"
+                            class="p-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg border border-gray-600 transition-colors disabled:hover:bg-gray-700"
+                            title="下一页">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="text-sm text-gray-400">
+                    <span x-text="formatTotalTweets()"></span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区域 -->
+    <main class="max-w-2xl mx-auto px-4 py-4">
+        <!-- 搜索/筛选状态栏 -->
+        <div x-show="(isSearchMode || isFilterMode) && !loading" 
+             class="mb-4 p-3 bg-blue-900/30 border border-blue-700 rounded-lg flex items-center justify-between">
+            <div class="flex items-center space-x-2 flex-wrap">
+                <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+                <!-- 搜索关键词 -->
+                <span x-show="isSearchMode" class="text-blue-300" x-text="getTranslation('web_search_result') + '&quot;' + currentSearchKeyword + '&quot;'"></span>
+                <!-- 筛选条件 -->
+                <span x-show="isFilterMode" class="text-green-300" x-text="getTranslation('web_filter_mode')"></span>
+                <span class="text-gray-400 text-sm" x-text="'(' + totalCount + getTranslation('web_search_items') + ')'"></span>
+            </div>
+            <button @click="clearSearch()"
+                    class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
+                    x-text="getTranslation('web_search_clear')">
+            </button>
+        </div>
+
+        <!-- 加载中状态 -->
+        <div x-show="loading" class="flex flex-col items-center justify-center py-20">
+            <div class="loading-spinner mb-4"></div>
+            <p class="text-gray-400" x-text="getTranslation('web_loading_tweets')"></p>
+        </div>
+
+        <!-- 推文列表 -->
+        <div x-show="!loading" class="space-y-4">
+            <template x-for="tweet in tweets" :key="tweet.id">
+                <article class="bg-gray-800 rounded-xl p-4 border border-gray-700 hover:border-gray-600 transition-colors">
+                    <!-- 作者信息 -->
+                    <div class="flex items-start space-x-3 mb-3">
+                        <img :src="getProfileImageUrl(tweet)" 
+                             :alt="tweet.name"
+                             class="w-12 h-12 rounded-full bg-gray-700 flex-shrink-0"
+                             @error="handleAvatarError($event, tweet)">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-bold text-white truncate" x-text="tweet.name"></span>
+                                <span class="text-gray-500 text-sm truncate" x-text="'@' + tweet.screen_name"></span>
+                            </div>
+                            <div class="text-gray-500 text-sm cursor-pointer hover:text-gray-400 transition-colors" 
+                                 @click="toggleFullDate(tweet.id)"
+                                 x-text="formatDate(tweet.created_at_ts, tweet.id)"></div>
+                        </div>
+                        <a :href="tweet.url" target="_blank" rel="noopener" 
+                           class="text-gray-500 hover:text-blue-400 transition-colors flex-shrink-0">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                            </svg>
+                        </a>
+                    </div>
+
+                    <!-- 推文正文 -->
+                    <div class="tweet-text text-gray-100 whitespace-pre-wrap break-words mb-3" 
+                         x-html="formatTweetText(tweet.full_text)"></div>
+
+                    <!-- 引用推文卡片 -->
+                    <div x-show="tweet.quoted_tweet" class="mt-3 mb-3">
+                        <!-- 有完整数据的引用 -->
+                        <template x-if="tweet.quoted_tweet && tweet.quoted_tweet.has_full_data">
+                            <div class="block border border-gray-600 rounded-xl overflow-hidden bg-gray-900/50">
+                                <!-- 引用推文头部 -->
+                                <div class="px-3 pt-3 pb-2 flex items-center space-x-2">
+                                    <img :src="getQuotedProfileImageUrl(tweet.quoted_tweet)" 
+                                         :alt="tweet.quoted_tweet.name"
+                                         class="w-5 h-5 rounded-full bg-gray-700 flex-shrink-0"
+                                         @error="handleQuotedAvatarError($event, tweet.quoted_tweet)">
+                                    <span class="font-medium text-white text-sm truncate" x-text="tweet.quoted_tweet.name"></span>
+                                    <span class="text-gray-500 text-sm truncate flex-1" x-text="'@' + tweet.quoted_tweet.screen_name"></span>
+                                    <!-- 跳转到原推文按钮 -->
+                                    <a :href="tweet.quoted_tweet.url" target="_blank" rel="noopener"
+                                       class="text-gray-500 hover:text-blue-400 transition-colors flex-shrink-0 p-1">
+                                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                                        </svg>
+                                    </a>
+                                </div>
+                                <!-- 引用推文正文 -->
+                                <div class="px-3 pb-2 text-gray-300 text-sm whitespace-pre-wrap break-words"
+                                     x-text="tweet.quoted_tweet.full_text"></div>
+                                <!-- 引用推文媒体预览 -->
+                                <div x-show="tweet.quoted_tweet.photos.length > 0 || tweet.quoted_tweet.videos.length > 0" 
+                                     class="px-3 pb-3">
+                                    <!-- 图片网格预览（可点击放大） -->
+                                    <div x-show="tweet.quoted_tweet.photos.length > 0" 
+                                         :class="{
+                                             'pswp-gallery grid gap-1 rounded-lg overflow-hidden': true,
+                                             'grid-cols-1': tweet.quoted_tweet.photos.length === 1,
+                                             'grid-cols-2': tweet.quoted_tweet.photos.length >= 2,
+                                             'grid-rows-2': tweet.quoted_tweet.photos.length === 3,
+                                             'aspect-video': tweet.quoted_tweet.photos.length === 3
+                                         }"
+                                         :id="'quoted-gallery-' + tweet.id">
+                                        <template x-for="(photo, index) in tweet.quoted_tweet.photos.slice(0, 4)" :key="photo.id">
+                                            <a :href="photo.local_url"
+                                               data-cropped="true"
+                                               :class="{
+                                                   'relative bg-gray-700 cursor-pointer group block': true,
+                                                   'aspect-video': tweet.quoted_tweet.photos.length === 1,
+                                                   'aspect-square': tweet.quoted_tweet.photos.length === 2 || tweet.quoted_tweet.photos.length >= 4,
+                                                   'row-span-2': tweet.quoted_tweet.photos.length === 3 && index === 0
+                                               }">
+                                                <img :src="photo.local_url" 
+                                                     :alt="getTranslation('web_image').replace('{index}', index + 1)"
+                                                     class="w-full h-full object-cover"
+                                                     loading="lazy">
+                                                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+                                                <!-- 如果超过4张，显示更多数量 -->
+                                                <div x-show="index === 3 && tweet.quoted_tweet.photos.length > 4"
+                                                     class="absolute inset-0 bg-black/60 flex items-center justify-center">
+                                                    <span class="text-white text-lg font-bold" x-text="'+' + (tweet.quoted_tweet.photos.length - 4)"></span>
+                                                </div>
+                                            </a>
+                                        </template>
+                                    </div>
+                                    <!-- 视频播放器 -->
+                                    <div x-show="tweet.quoted_tweet.videos.length > 0" class="space-y-2">
+                                        <template x-for="(video, index) in tweet.quoted_tweet.videos" :key="video.id">
+                                            <div class="rounded-lg overflow-hidden bg-gray-700">
+                                                <!-- iOS 需要 #t=0.001 来强制加载视频第一帧作为封面预览 -->
+                                                <video controls playsinline preload="metadata"
+                                                       class="w-full max-h-64"
+                                                       :src="video.local_url + (isIOS ? '#t=0.001' : '')">
+                                                    <span x-text="getTranslation('web_video_not_supported')"></span>
+                                                </video>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                                <!-- 嵌套引用提示（第二层只有ID，点击可跳转查看） -->
+                                <a x-show="tweet.quoted_tweet.nested_quoted_id"
+                                   :href="'https://twitter.com/i/status/' + tweet.quoted_tweet.nested_quoted_id"
+                                   target="_blank"
+                                   rel="noopener"
+                                   class="px-3 pb-3 text-xs text-gray-500 hover:text-blue-400 flex items-center cursor-pointer transition-colors">
+                                    <svg class="w-3 h-3 mr-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                                    </svg>
+                                    <span class="flex-1" x-text="getTranslation('web_quoted_nested')"></span>
+                                    <svg class="w-3 h-3 ml-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                    </svg>
+                                </a>
+                            </div>
+                        </template>
+                        <!-- 没有完整数据的引用（只有ID） -->
+                        <template x-if="tweet.quoted_tweet && !tweet.quoted_tweet.has_full_data">
+                            <a :href="'https://twitter.com/i/status/' + tweet.quoted_tweet.id" target="_blank" rel="noopener"
+                               class="block border border-gray-600 rounded-xl p-3 hover:border-gray-500 transition-colors bg-gray-900/50">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center text-gray-400 text-sm">
+                                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                                        </svg>
+                                        <span x-text="getTranslation('web_quoted_no_data')"></span>
+                                    </div>
+                                    <span class="text-blue-400 text-sm" x-text="getTranslation('web_quoted_view_original')"></span>
+                                </div>
+                            </a>
+                        </template>
+                    </div>
+
+                    <!-- 媒体展示 -->
+                    <div x-show="tweet.photos.length > 0 || tweet.videos.length > 0" class="mt-3">
+                        <!-- 图片网格 -->
+                        <div x-show="tweet.photos.length > 0" 
+                             :class="{
+                                 'pswp-gallery grid gap-1 rounded-xl overflow-hidden': true,
+                                 'grid-cols-1': tweet.photos.length === 1,
+                                 'grid-cols-2': tweet.photos.length >= 2,
+                                 'grid-rows-2': tweet.photos.length === 3,
+                                 'aspect-video': tweet.photos.length === 3
+                             }"
+                             :id="'gallery-' + tweet.id">
+                            <template x-for="(photo, index) in tweet.photos" :key="photo.id">
+                                <a :href="photo.local_url"
+                                   data-cropped="true"
+                                   target="_blank"
+                                   :class="{
+                                       'aspect-video': tweet.photos.length === 1,
+                                       'aspect-square': tweet.photos.length === 2 || tweet.photos.length >= 4,
+                                       'row-span-2': tweet.photos.length === 3 && index === 0
+                                   }" 
+                                   class="relative cursor-pointer group block">
+                                    <img :src="photo.local_url" 
+                                         :alt="getTranslation('web_image').replace('{index}', index + 1)"
+                                         class="w-full h-full object-cover bg-gray-700"
+                                         loading="lazy">
+                                    <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors"></div>
+                                </a>
+                            </template>
+                        </div>
+
+                        <!-- 视频播放器 -->
+                        <div x-show="tweet.videos.length > 0" class="space-y-2">
+                            <template x-for="(video, index) in tweet.videos" :key="video.id">
+                                <div class="rounded-xl overflow-hidden bg-gray-700">
+                                    <!-- iOS 需要 #t=0.001 来强制加载视频第一帧作为封面预览 -->
+                                    <video controls playsinline preload="metadata"
+                                           class="w-full max-h-96"
+                                           :src="video.local_url + (isIOS ? '#t=0.001' : '')">
+                                        <span x-text="getTranslation('web_video_not_supported')"></span>
+                                    </video>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- 统计信息和操作按钮 -->
+                    <div class="flex items-center justify-between mt-3 pt-3 border-t border-gray-700">
+                        <div class="flex items-center space-x-4 text-gray-500 text-sm">
+                            <div class="flex items-center space-x-1" x-show="tweet.views_count">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                </svg>
+                                <span x-text="formatNumber(tweet.views_count)"></span>
+                            </div>
+                            <div class="flex items-center space-x-1" x-show="tweet.media_count > 0">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                                <span x-text="t('web_media_count', {count: tweet.media_count})"></span>
+                            </div>
+                        </div>
+                        <!-- 菜单按钮 -->
+                        <div class="relative" x-data="{ menuOpen: false }">
+                            <button @click="menuOpen = !menuOpen"
+                                    @click.away="menuOpen = false"
+                                    class="p-2 text-gray-400 hover:text-gray-200 hover:bg-gray-700 rounded-lg transition-colors"
+                                    title="菜单">
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="5" r="2"></circle>
+                                    <circle cx="12" cy="12" r="2"></circle>
+                                    <circle cx="12" cy="19" r="2"></circle>
+                                </svg>
+                            </button>
+                            <!-- 下拉菜单 -->
+                            <div x-show="menuOpen" 
+                                 x-transition:enter="transition ease-out duration-100"
+                                 x-transition:enter-start="transform opacity-0 scale-95"
+                                 x-transition:enter-end="transform opacity-100 scale-100"
+                                 x-transition:leave="transition ease-in duration-75"
+                                 x-transition:leave-start="transform opacity-100 scale-100"
+                                 x-transition:leave-end="transform opacity-0 scale-95"
+                                 class="absolute right-0 bottom-full mb-1 w-36 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10 overflow-hidden">
+                                <button @click="showDetailDialog(tweet); menuOpen = false"
+                                        class="w-full px-4 py-2 text-left text-sm text-gray-200 hover:bg-gray-700 transition-colors flex items-center space-x-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    <span x-text="getTranslation('web_menu_detail')"></span>
+                                </button>
+                                <button @click="showRawDialog(tweet); menuOpen = false"
+                                        class="w-full px-4 py-2 text-left text-sm text-gray-200 hover:bg-gray-700 transition-colors flex items-center space-x-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
+                                    </svg>
+                                    <span>Raw</span>
+                                </button>
+                                <button x-show="isSearchMode || isFilterMode"
+                                        @click="locateTweet(tweet); menuOpen = false"
+                                        class="w-full px-4 py-2 text-left text-sm text-blue-400 hover:bg-gray-700 transition-colors flex items-center space-x-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                    </svg>
+                                    <span x-text="getTranslation('web_locate_tweet')"></span>
+                                </button>
+                                <button x-show="allowDelete && tweet.quoted_tweet"
+                                        @click="showClearQuoteDialog(tweet); menuOpen = false"
+                                        class="w-full px-4 py-2 text-left text-sm text-yellow-400 hover:bg-gray-700 transition-colors flex items-center space-x-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path>
+                                    </svg>
+                                    <span x-text="getTranslation('web_clear_quote')"></span>
+                                </button>
+                                <button x-show="allowDelete"
+                                        @click="showDeleteDialog(tweet); menuOpen = false"
+                                        class="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-gray-700 transition-colors flex items-center space-x-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                    <span x-text="getTranslation('web_delete')"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+            </template>
+        </div>
+
+        <!-- 空状态 -->
+        <div x-show="!loading && tweets.length === 0" class="text-center py-20">
+            <div class="text-6xl mb-4">📭</div>
+            <p class="text-gray-400" x-text="getTranslation('web_no_tweets')"></p>
+        </div>
+
+        <!-- 分页控件 -->
+        <div x-show="!loading && totalPages > 1" class="py-4">
+            <!-- 主分页按钮行 -->
+            <div class="flex items-center justify-center space-x-2 mb-4">
+                <button @click="goToPage(1)" 
+                        :disabled="currentPage === 1"
+                        :class="{'opacity-50 cursor-not-allowed': currentPage === 1}"
+                        class="px-3 py-2 bg-gray-800 rounded-lg border border-gray-700 hover:bg-gray-700 transition-colors"
+                        x-text="getTranslation('web_first_page')">
+                </button>
+                <button @click="goToPage(currentPage - 1)" 
+                        :disabled="!hasPrev"
+                        :class="{'opacity-50 cursor-not-allowed': !hasPrev}"
+                        class="px-4 py-2 bg-gray-800 rounded-lg border border-gray-700 hover:bg-gray-700 transition-colors"
+                        x-text="getTranslation('web_prev_page')">
+                </button>
+                <div class="px-4 py-2 bg-gray-800 rounded-lg border border-gray-700">
+                    <span x-text="currentPage" class="text-blue-400 font-semibold"></span>
+                    <span class="text-gray-500">/</span>
+                    <span x-text="totalPages" class="text-gray-400"></span>
+                </div>
+                <button @click="goToPage(currentPage + 1)" 
+                        :disabled="!hasNext"
+                        :class="{'opacity-50 cursor-not-allowed': !hasNext}"
+                        class="px-4 py-2 bg-gray-800 rounded-lg border border-gray-700 hover:bg-gray-700 transition-colors"
+                        x-text="getTranslation('web_next_page')">
+                </button>
+                <button @click="goToPage(totalPages)" 
+                        :disabled="currentPage === totalPages"
+                        :class="{'opacity-50 cursor-not-allowed': currentPage === totalPages}"
+                        class="px-3 py-2 bg-gray-800 rounded-lg border border-gray-700 hover:bg-gray-700 transition-colors"
+                        x-text="getTranslation('web_last_page')">
+                </button>
+            </div>
+            
+            <!-- 页码跳转输入框 -->
+            <div class="flex items-center justify-center space-x-2">
+                <span class="text-gray-400 text-sm" x-text="getTranslation('web_jump_to')"></span>
+                <input type="number" 
+                       x-model.number="jumpToPage"
+                       @keydown.enter="handleJumpToPage()"
+                       min="1" 
+                       :max="totalPages"
+                       class="w-20 px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-center text-white focus:outline-none focus:border-blue-500"
+                       :placeholder="currentPage">
+                <span class="text-gray-400 text-sm" x-text="getTranslation('web_page')"></span>
+                <button @click="handleJumpToPage()"
+                        class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm transition-colors">
+                    GO
+                </button>
+            </div>
+        </div>
+
+        <!-- 每页数量设置 -->
+        <div x-show="!loading" class="py-2">
+            <div class="flex items-center justify-center space-x-2">
+                <span class="text-gray-400 text-sm" x-text="getTranslation('web_per_page')"></span>
+                <select x-model.number="perPage" 
+                        @change="handlePerPageChange()"
+                        class="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                    <option value="30">30</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                </select>
+                <span class="text-gray-400 text-sm" x-text="getTranslation('web_tweets')"></span>
+            </div>
+        </div>
+
+        <!-- 穿越模式按钮（页尾） -->
+        <div x-show="!loading && totalPages > 1" class="py-4 flex justify-center">
+            <button @mousedown.prevent="startTravelerMode($event)"
+                    @touchstart.prevent="startTravelerMode($event)"
+                    class="flex items-center space-x-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg border border-gray-700 transition-colors select-none text-gray-400 hover:text-gray-200">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+                <span x-text="getTranslation('web_traveler_mode')"></span>
+            </button>
+        </div>
+    </main>
+
+    <!-- 底部Footer -->
+    <footer class="max-w-2xl mx-auto px-4 py-4 border-t border-gray-700 mt-4">
+        <div class="flex flex-col items-center justify-center space-y-3">
+            <!-- 头像来源选项 -->
+            <div class="flex items-center space-x-2 text-sm">
+                <span class="text-gray-400" x-text="getTranslation('web_avatar_source')"></span>
+                <select x-model="avatarSource"
+                        class="px-2 py-1 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="local" x-text="getTranslation('web_avatar_source_local')"></option>
+                    <option value="twitter" x-text="getTranslation('web_avatar_source_twitter')"></option>
+                    <option value="mixed" x-text="getTranslation('web_avatar_source_mixed')"></option>
+                </select>
+            </div>
+            
+            <!-- 重置设置按钮 -->
+            <button @click="resetSettings()"
+                    class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                    x-text="getTranslation('web_reset_settings')">
+            </button>
+            
+            <a href="https://github.com/kannazuki-c/twitter-web-exporter-gui" 
+               target="_blank" 
+               rel="noopener" 
+               class="flex items-center space-x-2 text-gray-400 hover:text-blue-400 transition-colors">
+                <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path>
+                </svg>
+            </a>
+            <p class="text-sm text-gray-500" x-text="getTranslation('web_powered_by')"></p>
+        </div>
+    </footer>
+
+    <!-- 删除确认对话框 -->
+    <div x-cloak
+         x-show="deleteDialogOpen" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         @keydown.escape.window="closeDeleteDialog()"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+         style="backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+        <div class="bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4 border border-gray-700">
+            <h3 class="text-xl font-bold text-white mb-4" x-text="getTranslation('web_delete_tweet')"></h3>
+            <p class="text-gray-300 mb-4" x-text="getTranslation('web_delete_confirm')"></p>
+            <!-- 删除媒体文件选项 -->
+            <label class="flex items-center space-x-3 cursor-pointer mb-4">
+                <input type="checkbox" 
+                       x-model="deleteMediaFiles"
+                       class="w-5 h-5 rounded bg-gray-700 border-gray-600 text-red-600 focus:ring-red-500 focus:ring-offset-gray-800">
+                <span class="text-gray-200" x-text="getTranslation('web_delete_media_files')"></span>
+            </label>
+            <div class="flex flex-col space-y-2 mb-4">
+                <button @click="deleteTweet('move')"
+                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                        x-text="getTranslation('web_delete_move')">
+                </button>
+                <button @click="deleteTweet('permanent')"
+                        class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                        x-text="getTranslation('web_delete_permanent')">
+                </button>
+            </div>
+            <button @click="closeDeleteDialog()"
+                    class="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                    x-text="getTranslation('web_cancel')">
+            </button>
+        </div>
+    </div>
+
+    <!-- 清除引用确认对话框 -->
+    <div x-cloak
+         x-show="clearQuoteDialogOpen" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         @keydown.escape.window="closeClearQuoteDialog()"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+         style="backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+        <div class="bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4 border border-gray-700">
+            <h3 class="text-xl font-bold text-white mb-4" x-text="getTranslation('web_clear_quote_title')"></h3>
+            <p class="text-gray-300 mb-6" x-text="getTranslation('web_clear_quote_confirm')"></p>
+            <div class="flex space-x-3">
+                <button @click="clearQuote()"
+                        class="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors"
+                        x-text="getTranslation('web_confirm')">
+                </button>
+                <button @click="closeClearQuoteDialog()"
+                        class="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                        x-text="getTranslation('web_cancel')">
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详细信息对话框 -->
+    <div x-cloak
+         x-show="detailDialogOpen" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         @keydown.escape.window="closeDetailDialog()"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+         style="backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+        <div class="bg-gray-800 rounded-xl p-6 max-w-lg w-full mx-4 border border-gray-700 max-h-[80vh] overflow-y-auto">
+            <h3 class="text-xl font-bold text-white mb-4" x-text="getTranslation('web_menu_detail')"></h3>
+            <div class="space-y-3 text-sm">
+                <!-- Doc ID -->
+                <div class="flex flex-col">
+                    <span class="text-gray-400 mb-1">Doc ID</span>
+                    <span class="text-white bg-gray-700 px-3 py-2 rounded-lg font-mono" x-text="detailTweet?.doc_id"></span>
+                </div>
+                <!-- 推特 ID -->
+                <div class="flex flex-col">
+                    <span class="text-gray-400 mb-1" x-text="getTranslation('web_detail_tweet_id')"></span>
+                    <span class="text-white bg-gray-700 px-3 py-2 rounded-lg font-mono" x-text="detailTweet?.id"></span>
+                </div>
+                <!-- 媒体文件路径 -->
+                <div class="flex flex-col">
+                    <span class="text-gray-400 mb-1" x-text="getTranslation('web_detail_media_paths')"></span>
+                    <div class="bg-gray-700 px-3 py-2 rounded-lg font-mono text-white text-xs break-all">
+                        <template x-if="detailTweet?.media_paths && detailTweet.media_paths.length > 0">
+                            <div class="space-y-1">
+                                <template x-for="path in detailTweet.media_paths" :key="path">
+                                    <div x-text="path"></div>
+                                </template>
+                            </div>
+                        </template>
+                        <template x-if="!detailTweet?.media_paths || detailTweet.media_paths.length === 0">
+                            <span class="text-gray-500" x-text="getTranslation('web_detail_no_media')"></span>
+                        </template>
+                    </div>
+                </div>
+                <!-- 统计数据 -->
+                <div class="grid grid-cols-3 gap-3">
+                    <!-- 点赞数 -->
+                    <div class="flex flex-col bg-gray-700 px-3 py-2 rounded-lg">
+                        <span class="text-gray-400 text-xs mb-1" x-text="getTranslation('web_detail_favorites')"></span>
+                        <span class="text-white font-semibold" x-text="formatNumber(detailTweet?.favorite_count || 0)"></span>
+                    </div>
+                    <!-- 转推数 -->
+                    <div class="flex flex-col bg-gray-700 px-3 py-2 rounded-lg">
+                        <span class="text-gray-400 text-xs mb-1" x-text="getTranslation('web_detail_retweets')"></span>
+                        <span class="text-white font-semibold" x-text="formatNumber(detailTweet?.retweet_count || 0)"></span>
+                    </div>
+                    <!-- 书签数 -->
+                    <div class="flex flex-col bg-gray-700 px-3 py-2 rounded-lg">
+                        <span class="text-gray-400 text-xs mb-1" x-text="getTranslation('web_detail_bookmarks')"></span>
+                        <span class="text-white font-semibold" x-text="formatNumber(detailTweet?.bookmark_count || 0)"></span>
+                    </div>
+                </div>
+            </div>
+            <button @click="closeDetailDialog()"
+                    class="w-full mt-4 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                    x-text="getTranslation('web_close')">
+            </button>
+        </div>
+    </div>
+
+    <!-- Raw 数据对话框 -->
+    <div x-cloak
+         x-show="rawDialogOpen" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         @keydown.escape.window="closeRawDialog()"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+         style="backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+        <div class="bg-gray-800 rounded-xl p-6 max-w-2xl w-full mx-4 border border-gray-700 max-h-[80vh] flex flex-col">
+            <h3 class="text-xl font-bold text-white mb-4">Raw Data</h3>
+            <div class="flex-1 min-h-0 mb-4">
+                <textarea readonly
+                          class="w-full h-full min-h-[300px] max-h-[60vh] bg-gray-900 text-gray-200 font-mono text-xs p-3 rounded-lg border border-gray-700 resize-none focus:outline-none"
+                          x-text="rawTweet?.raw || ''"></textarea>
+            </div>
+            <button @click="closeRawDialog()"
+                    class="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                    x-text="getTranslation('web_close')">
+            </button>
+        </div>
+    </div>
+
+    <!-- 搜索对话框 -->
+    <div x-cloak
+         x-show="searchDialogOpen" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         @keydown.escape.window="closeSearchDialog()"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+         style="backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);">
+        <div class="bg-gray-800 rounded-xl p-6 max-w-md w-full mx-4 border border-gray-700">
+            <h3 class="text-xl font-bold text-white mb-4" x-text="getTranslation('web_search')"></h3>
+            
+            <!-- 搜索输入框 -->
+            <div class="mb-4">
+                <input type="text" 
+                       x-model="searchKeyword"
+                       @keydown.enter="doSearch()"
+                       class="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                       :placeholder="getTranslation('web_search_placeholder')">
+            </div>
+            
+            <!-- 搜索范围选项 -->
+            <div class="mb-6 space-y-3">
+                <label class="flex items-center space-x-3 cursor-pointer">
+                    <input type="checkbox" 
+                           x-model="searchInName"
+                           class="w-5 h-5 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-800">
+                    <span class="text-gray-200" x-text="getTranslation('web_search_author_name')"></span>
+                </label>
+                <label class="flex items-center space-x-3 cursor-pointer">
+                    <input type="checkbox" 
+                           x-model="searchInScreenName"
+                           class="w-5 h-5 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-800">
+                    <span class="text-gray-200" x-text="getTranslation('web_search_author_id')"></span>
+                </label>
+                <label class="flex items-center space-x-3 cursor-pointer">
+                    <input type="checkbox" 
+                           x-model="searchInText"
+                           class="w-5 h-5 rounded bg-gray-700 border-gray-600 text-blue-600 focus:ring-blue-500 focus:ring-offset-gray-800">
+                    <span class="text-gray-200" x-text="getTranslation('web_search_content')"></span>
+                </label>
+                
+                <!-- 分割线 -->
+                <div class="border-t border-gray-600 my-2"></div>
+                
+                <!-- 筛选选项 -->
+                <label class="flex items-center space-x-3 cursor-pointer">
+                    <input type="checkbox" 
+                           x-model="filterUndownloadedMedia"
+                           class="w-5 h-5 rounded bg-gray-700 border-gray-600 text-green-600 focus:ring-green-500 focus:ring-offset-gray-800">
+                    <span class="text-gray-200" x-text="getTranslation('web_filter_undownloaded_media')"></span>
+                </label>
+            </div>
+            
+            <!-- 当前搜索/筛选状态提示 -->
+            <div x-show="isSearchMode && !isFilterMode" class="mb-4 p-3 bg-blue-900/30 border border-blue-700 rounded-lg">
+                <div class="flex items-center justify-between">
+                    <span class="text-blue-300 text-sm" x-text="getTranslation('web_search_current')"></span>
+                    <button @click="clearSearch()"
+                            class="text-blue-400 hover:text-blue-300 text-sm underline"
+                            x-text="getTranslation('web_search_clear')">
+                    </button>
+                </div>
+                <div class="text-white mt-1" x-text="'&quot;' + currentSearchKeyword + '&quot;'"></div>
+            </div>
+            <div x-show="isFilterMode && !isSearchMode" class="mb-4 p-3 bg-green-900/30 border border-green-700 rounded-lg">
+                <div class="flex items-center justify-between">
+                    <span class="text-green-300 text-sm" x-text="getTranslation('web_filter_mode')"></span>
+                    <button @click="clearSearch()"
+                            class="text-green-400 hover:text-green-300 text-sm underline"
+                            x-text="getTranslation('web_search_clear')">
+                    </button>
+                </div>
+                <div class="text-green-300 mt-1" x-text="getTranslation('web_filter_undownloaded_media')"></div>
+            </div>
+            <div x-show="isSearchMode && isFilterMode" class="mb-4 p-3 bg-purple-900/30 border border-purple-700 rounded-lg">
+                <div class="flex items-center justify-between">
+                    <span class="text-purple-300 text-sm" x-text="getTranslation('web_search_current')"></span>
+                    <button @click="clearSearch()"
+                            class="text-purple-400 hover:text-purple-300 text-sm underline"
+                            x-text="getTranslation('web_search_clear')">
+                    </button>
+                </div>
+                <div class="text-white mt-1" x-text="'&quot;' + currentSearchKeyword + '&quot;'"></div>
+                <div class="text-green-300 mt-1" x-text="'+ ' + getTranslation('web_filter_undownloaded_media')"></div>
+            </div>
+            
+            <!-- 按钮区域 -->
+            <div class="flex space-x-3">
+                <button @click="doSearch()"
+                        :disabled="!filterUndownloadedMedia && (!searchKeyword.trim() || (!searchInName && !searchInScreenName && !searchInText))"
+                        :class="{'opacity-50 cursor-not-allowed': !filterUndownloadedMedia && (!searchKeyword.trim() || (!searchInName && !searchInScreenName && !searchInText))}"
+                        class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                        x-text="getTranslation('web_search_filter')">
+                </button>
+                <button @click="closeSearchDialog()"
+                        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                        x-text="getTranslation('web_cancel')">
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 穿越模式覆盖层 -->
+    <div x-cloak
+         x-show="travelerMode"
+         @mousemove.window="updateTravelerPage($event)"
+         @mouseup.window="endTravelerMode($event)"
+         @touchmove.window="updateTravelerPage($event)"
+         @touchend.window="endTravelerMode($event)"
+         @touchcancel.window="cancelTravelerMode()"
+         class="fixed inset-0 z-50 select-none touch-none"
+         style="backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); background: rgba(0,0,0,0.85);">
+        <!-- 页码显示区域 -->
+        <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <!-- 当前选择的页码 -->
+            <div class="text-center">
+                <div class="text-8xl font-bold text-blue-400 mb-4" x-text="travelerPage"></div>
+                <div class="text-2xl text-gray-400">
+                    <span x-text="'/ ' + totalPages"></span>
+                </div>
+                <div class="mt-6 text-gray-500 text-sm" x-text="getTranslation('web_traveler_hint')"></div>
+            </div>
+
+            <!-- 进度条区域 -->
+            <div class="absolute bottom-32 left-8 right-8">
+                <!-- 选择进度条 -->
+                <div class="relative h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div class="h-full bg-blue-500 transition-all duration-75 rounded-full"
+                         :style="'width: ' + ((travelerPage / totalPages) * 100) + '%'"></div>
+                </div>
+                <div class="flex justify-between mt-2 text-xs text-gray-500">
+                    <span>1</span>
+                    <span x-text="totalPages"></span>
+                </div>
+                <!-- 当前页面位置黄点提示 -->
+                <div class="relative mt-3">
+                    <div class="absolute w-3 h-3 bg-yellow-400 rounded-full shadow-lg shadow-yellow-400/50 transition-all duration-75"
+                         :style="'left: calc(' + ((currentPage - 1) / (totalPages - 1) * 100) + '% - 6px)'"></div>
+                    <div class="text-center pt-5 text-xs text-yellow-400" x-text="getTranslation('web_traveler_you_are_here')"></div>
+                </div>
+            </div>
+
+            <!-- 取消提示区域（底部） -->
+            <div class="absolute bottom-0 left-0 right-0 h-20 flex items-center justify-center"
+                 :class="{'bg-red-900/50': travelerInCancelZone}">
+                <span class="text-gray-400 text-sm" :class="{'text-red-300': travelerInCancelZone}">
+                    <span x-text="travelerInCancelZone ? getTranslation('web_traveler_release_cancel') : getTranslation('web_traveler_drag_cancel')"></span>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 返回顶部按钮 -->
+    <button x-show="showBackToTop" 
+            x-transition
+            @click="window.scrollTo({top: 0, behavior: 'smooth'})"
+            class="fixed bottom-6 right-6 p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-colors z-40">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path>
+        </svg>
+    </button>
+
+    <script>
+        // 从服务器注入的配置
+        const SERVER_CONFIG = {
+            allowDelete: {{ allow_delete|tojson }},
+            currentLang: {{ current_lang|tojson }},
+            translations: {{ translations|tojson }}
+        };
+        
+        // 翻译函数
+        function t(key, params = {}) {
+            const translation = SERVER_CONFIG.translations[key] || key;
+            if (Object.keys(params).length === 0) {
+                return translation;
+            }
+            // 简单的参数替换
+            let result = translation;
+            for (const [k, v] of Object.entries(params)) {
+                result = result.replace(`{${k}}`, v);
+            }
+            return result;
+        }
+        
+        // Cookie 操作辅助函数
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return null;
+        }
+        
+        function setCookie(name, value, days = 365) {
+            const expires = new Date(Date.now() + days * 864e5).toUTCString();
+            document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+        }
+        
+        function deleteCookie(name) {
+            document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+        }
+        
+        function tweetApp() {
+            return {
+                // 数据
+                tweets: [],
+                currentPage: 1,
+                totalPages: 1,
+                totalCount: 0,
+                perPage: 10,
+                hasPrev: false,
+                hasNext: false,
+                loading: true,
+                allowDelete: SERVER_CONFIG.allowDelete,
+                
+                // 翻译字典（在组件内使用）
+                translations: SERVER_CONFIG.translations,
+                
+                // 安全获取翻译，如果找不到就返回key
+                getTranslation(key) {
+                    return this.translations[key] || key;
+                },
+                
+                // 格式化总推文数
+                formatTotalTweets() {
+                    return this.getTranslation('web_total_tweets').replace('{count}', this.totalCount);
+                },
+                
+                // PhotoSwipe 实例集合
+                photoswipeInstances: {},
+                
+                // 推文完整日期显示状态
+                fullDateDisplay: {},
+                
+                // 删除对话框
+                deleteDialogOpen: false,
+                tweetToDelete: null,
+                deleteMediaFiles: false,  // 是否同时删除媒体文件
+                
+                // 详细信息对话框
+                detailDialogOpen: false,
+                detailTweet: null,
+                
+                // Raw 数据对话框
+                rawDialogOpen: false,
+                rawTweet: null,
+                
+                // 清除引用对话框
+                clearQuoteDialogOpen: false,
+                tweetToClearQuote: null,
+                
+                // 返回顶部
+                showBackToTop: false,
+                
+                // 页码跳转
+                jumpToPage: null,
+                
+                // 穿越模式
+                travelerMode: false,
+                travelerPage: 1,
+                travelerStartX: 0,
+                travelerInCancelZone: false,
+                
+                // 搜索功能
+                searchDialogOpen: false,
+                searchKeyword: '',
+                searchInName: true,
+                searchInScreenName: true,
+                searchInText: true,
+                filterUndownloadedMedia: false,
+                isSearchMode: false,
+                isFilterMode: false,
+                currentSearchKeyword: '',
+                
+                // iOS 设备检测（用于视频封面预览兼容）
+                isIOS: /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
+                
+                // 头像来源：'local' 或 'twitter' 或 'mixed'
+                avatarSource: 'mixed',
+                
+                // 重载服务器状态
+                isReloading: false,
+                
+                // 初始化
+                init() {
+                    // 从 cookie 读取已保存的设置
+                    const savedAvatarSource = getCookie('twegui_avatarSource');
+                    if (savedAvatarSource && ['local', 'twitter', 'mixed'].includes(savedAvatarSource)) {
+                        this.avatarSource = savedAvatarSource;
+                    }
+                    
+                    const savedPerPage = getCookie('twegui_perPage');
+                    if (savedPerPage) {
+                        const perPageNum = parseInt(savedPerPage);
+                        if (!isNaN(perPageNum) && perPageNum >= 1 && perPageNum <= 200) {
+                            this.perPage = perPageNum;
+                        }
+                    }
+                    
+                    // 监听设置变化并保存到 cookie
+                    this.$watch('avatarSource', (value) => {
+                        setCookie('twegui_avatarSource', value);
+                    });
+                    
+                    this.$watch('perPage', (value) => {
+                        setCookie('twegui_perPage', value);
+                    });
+                    
+                    // 从 URL 参数读取初始页码
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const initialPage = parseInt(urlParams.get('page')) || 1;
+                    
+                    this.loadTweets(initialPage, false); // 初始加载不更新 URL
+                    
+                    window.addEventListener('scroll', () => {
+                        this.showBackToTop = window.scrollY > 500;
+                    });
+                    
+                    // 监听浏览器前进后退事件
+                    window.addEventListener('popstate', (event) => {
+                        const urlParams = new URLSearchParams(window.location.search);
+                        const page = parseInt(urlParams.get('page')) || 1;
+                        if (page !== this.currentPage) {
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                            this.loadTweets(page, false); // 前进后退时不再更新 URL
+                        }
+                    });
+                },
+                
+                // 加载推文
+                async loadTweets(page, updateUrl = true) {
+                    this.loading = true;
+                    try {
+                        // 构建 URL 参数
+                        let url = `/api/tweets?page=${page}&per_page=${this.perPage}`;
+                        
+                        // 如果是搜索模式，添加搜索参数
+                        if (this.isSearchMode && this.currentSearchKeyword) {
+                            url += `&q=${encodeURIComponent(this.currentSearchKeyword)}`;
+                            if (this.searchInName) url += '&in_name=1';
+                            if (this.searchInScreenName) url += '&in_screen_name=1';
+                            if (this.searchInText) url += '&in_text=1';
+                        }
+                        
+                        // 如果是筛选模式，添加筛选参数
+                        if (this.isFilterMode) {
+                            url += '&has_undownloaded_media=1';
+                        }
+                        
+                        const response = await fetch(url);
+                        const data = await response.json();
+                        this.tweets = data.tweets;
+                        this.currentPage = data.page;
+                        this.totalPages = data.total_pages;
+                        this.totalCount = data.total;
+                        this.hasPrev = data.has_prev;
+                        this.hasNext = data.has_next;
+                        // 更新是否允许删除
+                        if (data.allow_delete !== undefined) {
+                            this.allowDelete = data.allow_delete;
+                        }
+                        // 重置完整日期显示状态（新加载的推文默认不显示完整时间）
+                        this.fullDateDisplay = {};
+                        
+                        // 更新 URL（使用 pushState 以支持浏览器前进后退）
+                        if (updateUrl) {
+                            const newUrl = page === 1 ? window.location.pathname : `?page=${page}`;
+                            history.pushState({ page: page }, '', newUrl);
+                        }
+                        
+                        // 等待 DOM 更新后初始化 PhotoSwipe
+                        this.$nextTick(() => {
+                            this.initPhotoSwipe();
+                        });
+                    } catch (error) {
+                        console.error('加载推文失败:', error);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                // 初始化 PhotoSwipe
+                initPhotoSwipe() {
+                    // 销毁旧的实例
+                    Object.values(this.photoswipeInstances).forEach(instance => {
+                        if (instance) instance.destroy();
+                    });
+                    this.photoswipeInstances = {};
+                    
+                    // 收集所有需要初始化的画廊
+                    const galleries = [];
+                    
+                    this.tweets.forEach(tweet => {
+                        // 主推文图片
+                        if (tweet.photos && tweet.photos.length > 0) {
+                            galleries.push({
+                                id: `gallery-${tweet.id}`,
+                                photos: tweet.photos
+                            });
+                        }
+                        // 引用推文图片
+                        if (tweet.quoted_tweet && tweet.quoted_tweet.photos && tweet.quoted_tweet.photos.length > 0) {
+                            galleries.push({
+                                id: `quoted-gallery-${tweet.id}`,
+                                photos: tweet.quoted_tweet.photos
+                            });
+                        }
+                    });
+                    
+                    // 为每个画廊初始化 PhotoSwipe
+                    galleries.forEach(({ id: galleryId }) => {
+                        const galleryElement = document.getElementById(galleryId);
+                        
+                        if (galleryElement) {
+                            // 动态导入 PhotoSwipe 模块
+                            import('https://unpkg.com/photoswipe@5.4.4/dist/photoswipe-lightbox.esm.js')
+                                .then(module => {
+                                    const PhotoSwipeLightbox = module.default;
+                                    const lightbox = new PhotoSwipeLightbox({
+                                        gallery: `#${galleryId}`,
+                                        children: 'a',
+                                        pswpModule: () => import('https://unpkg.com/photoswipe@5.4.4/dist/photoswipe.esm.js'),
+                                        
+                                        // 使用淡入淡出动画，避免从裁剪缩略图的缩放问题
+                                        showHideAnimationType: 'fade',
+                                        
+                                        // 保持图片原始比例的配置
+                                        initialZoomLevel: 'fit',  // 初始缩放级别：适应屏幕，保持完整图片
+                                        secondaryZoomLevel: 1.0,  // 二次点击缩放级别：1.0倍
+                                        maxZoomLevel: 3,          // 最大缩放级别：3倍
+                                        
+                                        // 点击和触摸行为
+                                        doubleTapAction: 'zoom',           // 双击时缩放（保留双击放大功能）
+                                        
+                                        // 视觉效果
+                                        bgOpacity: 0.95,          // 背景透明度
+                                        spacing: 0.1,             // 图片之间的间距
+                                        
+                                        // 交互行为
+                                        allowPanToNext: true,     // 允许拖动到下一张
+                                        loop: true,               // 循环浏览
+                                        pinchToClose: true,       // 捏合关闭
+                                        closeOnVerticalDrag: true // 垂直拖动关闭
+                                    });
+                                    
+                                    // 动态获取图片真实尺寸，保持原比例
+                                    lightbox.addFilter('domItemData', (itemData, element, linkEl) => {
+                                        if (linkEl) {
+                                            const imgEl = linkEl.querySelector('img');
+                                            if (imgEl) {
+                                                // 使用图片的自然尺寸
+                                                itemData.src = linkEl.href;
+                                                // 如果图片已加载，使用自然尺寸；否则使用默认值
+                                                if (imgEl.naturalWidth && imgEl.naturalHeight) {
+                                                    itemData.w = imgEl.naturalWidth;
+                                                    itemData.h = imgEl.naturalHeight;
+                                                }
+                                                itemData.msrc = imgEl.src;
+                                                itemData.thumbCropped = true;
+                                            }
+                                        }
+                                        return itemData;
+                                    });
+                                    
+                                    // 在图片内容加载完成后更新尺寸（处理懒加载的情况）
+                                    lightbox.on('contentLoad', (e) => {
+                                        const { content } = e;
+                                        if (content.type === 'image') {
+                                            const img = new Image();
+                                            img.onload = () => {
+                                                content.data.w = img.naturalWidth;
+                                                content.data.h = img.naturalHeight;
+                                            };
+                                            img.src = content.data.src;
+                                        }
+                                    });
+                                    
+                                    lightbox.init();
+                                    this.photoswipeInstances[galleryId] = lightbox;
+                                })
+                                .catch(error => {
+                                    console.error('加载 PhotoSwipe 失败:', error);
+                                });
+                        }
+                    });
+                },
+                
+                // 跳转页面
+                goToPage(page) {
+                    if (page < 1 || page > this.totalPages) return;
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    this.loadTweets(page);
+                },
+                
+                // 处理页码跳转
+                handleJumpToPage() {
+                    const page = parseInt(this.jumpToPage);
+                    if (!isNaN(page) && page >= 1 && page <= this.totalPages) {
+                        this.goToPage(page);
+                        this.jumpToPage = null;
+                    }
+                },
+                
+                // 处理每页数量变更
+                handlePerPageChange() {
+                    // 验证每页数量范围
+                    if (this.perPage < 1) {
+                        this.perPage = 1;
+                    } else if (this.perPage > 200) {
+                        this.perPage = 200;
+                    }
+                    // 重新加载第1页（因为每页数量改变后，当前页可能不存在）
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    this.loadTweets(1);
+                },
+                
+                // 切换完整日期显示状态
+                toggleFullDate(tweetId) {
+                    this.fullDateDisplay[tweetId] = !this.fullDateDisplay[tweetId];
+                },
+                
+                // 格式化完整日期（如：2025年11月9日 13:19）
+                formatFullDate(date) {
+                    const year = date.getFullYear();
+                    const month = date.getMonth() + 1;
+                    const day = date.getDate();
+                    const hour = String(date.getHours()).padStart(2, '0');
+                    const minute = String(date.getMinutes()).padStart(2, '0');
+                    
+                    if (SERVER_CONFIG.currentLang === 'zh-CN') {
+                        return `${year}年${month}月${day}日 ${hour}:${minute}`;
+                    } else {
+                        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                                           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                        return `${monthNames[month - 1]} ${day}, ${year} ${hour}:${minute}`;
+                    }
+                },
+                
+                // 格式化日期（timestamp 为毫秒时间戳）
+                formatDate(timestamp, tweetId) {
+                    if (!timestamp) return '';
+                    
+                    const date = new Date(timestamp);
+                    const now = new Date();
+                    const diff = now - date;
+                    const showFull = this.fullDateDisplay[tweetId];
+                    
+                    // 7天内可以显示相对时间，超过7天只显示完整日期
+                    const canShowRelative = diff < 604800000;
+                    
+                    // 用户点击切换或超过7天时，显示完整日期
+                    if (showFull || !canShowRelative) {
+                        return this.formatFullDate(date);
+                    }
+                    
+                    // 显示相对时间
+                    // 小于1小时
+                    if (diff < 3600000) {
+                        const mins = Math.floor(diff / 60000);
+                        if (mins <= 0) {
+                            return this.getTranslation('web_just_now');
+                        }
+                        return this.getTranslation('web_minutes_ago').replace('{mins}', mins);
+                    }
+                    // 小于24小时
+                    if (diff < 86400000) {
+                        const hours = Math.floor(diff / 3600000);
+                        return this.getTranslation('web_hours_ago').replace('{hours}', hours);
+                    }
+                    // 小于7天
+                    const days = Math.floor(diff / 86400000);
+                    return this.getTranslation('web_days_ago').replace('{days}', days);
+                },
+                
+                // 格式化数字
+                formatNumber(num) {
+                    if (!num) return '0';
+                    if (num >= 1000000) {
+                        return (num / 1000000).toFixed(1) + 'M';
+                    }
+                    if (num >= 1000) {
+                        return (num / 1000).toFixed(1) + 'K';
+                    }
+                    return num.toString();
+                },
+                
+                // 格式化推文文本（将URL转为链接）
+                formatTweetText(text) {
+                    if (!text) return '';
+                    // 转义HTML
+                    let escaped = text
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
+                    // 将URL转为可点击链接
+                    escaped = escaped.replace(
+                        /(https?:\/\/[^\s]+)/g,
+                        '<a href="$1" target="_blank" rel="noopener">$1</a>'
+                    );
+                    // 将 @mentions 转为链接
+                    escaped = escaped.replace(
+                        /@(\w+)/g,
+                        '<a href="https://twitter.com/$1" target="_blank" rel="noopener">@$1</a>'
+                    );
+                    // 将 #hashtags 转为链接
+                    escaped = escaped.replace(
+                        /#(\w+)/g,
+                        '<a href="https://twitter.com/hashtag/$1" target="_blank" rel="noopener">#$1</a>'
+                    );
+                    return escaped;
+                },
+                
+                // 获取头像 URL（根据来源设置）
+                getProfileImageUrl(tweet) {
+                    if (this.avatarSource === 'local' || this.avatarSource === 'mixed') {
+                        // 本地模式或混合模式：优先使用本地头像
+                        if (tweet.user_id) {
+                            return `/profile/${tweet.user_id}`;
+                        }
+                        // 没有 user_id，返回默认头像
+                        return '/res/default_profile.png';
+                    } else {
+                        // 使用 Twitter CDN
+                        return tweet.profile_image_url || 'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png';
+                    }
+                },
+                
+                // 获取引用推文头像 URL
+                getQuotedProfileImageUrl(quotedTweet) {
+                    if (!quotedTweet) return '/res/default_profile.png';
+                    
+                    if (this.avatarSource === 'local' || this.avatarSource === 'mixed') {
+                        // 本地模式或混合模式：优先使用本地头像
+                        if (quotedTweet.user_id) {
+                            return `/profile/${quotedTweet.user_id}`;
+                        }
+                        return '/res/default_profile.png';
+                    } else {
+                        // 使用 Twitter CDN
+                        return quotedTweet.profile_image_url || 'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png';
+                    }
+                },
+                
+                // 处理头像加载失败
+                handleAvatarError(event, tweet) {
+                    const img = event.target;
+                    const currentSrc = img.src;
+                    
+                    if (this.avatarSource === 'mixed' && currentSrc.includes('/profile/')) {
+                        // 混合模式下，本地头像加载失败，尝试 Twitter CDN
+                        img.src = tweet.profile_image_url || 'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png';
+                    } else if (this.avatarSource === 'local') {
+                        // 本地模式下，使用本地默认头像
+                        img.src = '/res/default_profile.png';
+                    } else {
+                        // Twitter 模式或混合模式的第二次失败，使用 Twitter 默认头像
+                        img.src = 'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png';
+                    }
+                },
+                
+                // 处理引用推文头像加载失败
+                handleQuotedAvatarError(event, quotedTweet) {
+                    const img = event.target;
+                    const currentSrc = img.src;
+                    
+                    if (this.avatarSource === 'mixed' && currentSrc.includes('/profile/')) {
+                        // 混合模式下，本地头像加载失败，尝试 Twitter CDN
+                        img.src = quotedTweet?.profile_image_url || 'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png';
+                    } else if (this.avatarSource === 'local') {
+                        // 本地模式下，使用本地默认头像
+                        img.src = '/res/default_profile.png';
+                    } else {
+                        // Twitter 模式或混合模式的第二次失败，使用 Twitter 默认头像
+                        img.src = 'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png';
+                    }
+                },
+                
+                // 显示删除对话框
+                showDeleteDialog(tweet) {
+                    this.tweetToDelete = tweet;
+                    this.deleteDialogOpen = true;
+                    document.documentElement.classList.add('modal-open');
+                },
+                
+                // 关闭删除对话框
+                closeDeleteDialog() {
+                    this.deleteDialogOpen = false;
+                    this.tweetToDelete = null;
+                    this.deleteMediaFiles = false;  // 重置勾选状态
+                    document.documentElement.classList.remove('modal-open');
+                },
+                
+                // 显示详细信息对话框
+                showDetailDialog(tweet) {
+                    this.detailTweet = tweet;
+                    this.detailDialogOpen = true;
+                    document.documentElement.classList.add('modal-open');
+                },
+                
+                // 关闭详细信息对话框
+                closeDetailDialog() {
+                    this.detailDialogOpen = false;
+                    this.detailTweet = null;
+                    document.documentElement.classList.remove('modal-open');
+                },
+                
+                // 显示 Raw 数据对话框
+                showRawDialog(tweet) {
+                    this.rawTweet = tweet;
+                    this.rawDialogOpen = true;
+                    document.documentElement.classList.add('modal-open');
+                },
+                
+                // 关闭 Raw 数据对话框
+                closeRawDialog() {
+                    this.rawDialogOpen = false;
+                    this.rawTweet = null;
+                    document.documentElement.classList.remove('modal-open');
+                },
+                
+                // 显示清除引用对话框
+                showClearQuoteDialog(tweet) {
+                    this.tweetToClearQuote = tweet;
+                    this.clearQuoteDialogOpen = true;
+                    document.documentElement.classList.add('modal-open');
+                },
+                
+                // 关闭清除引用对话框
+                closeClearQuoteDialog() {
+                    this.clearQuoteDialogOpen = false;
+                    this.tweetToClearQuote = null;
+                    document.documentElement.classList.remove('modal-open');
+                },
+                
+                // 清除引用推文数据
+                async clearQuote() {
+                    if (!this.tweetToClearQuote) return;
+                    
+                    try {
+                        const response = await fetch(`/api/tweet/${this.tweetToClearQuote.id}/clear_quote`, {
+                            method: 'POST'
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            // 成功，重新加载当前页
+                            this.closeClearQuoteDialog();
+                            await this.loadTweets(this.currentPage);
+                        } else {
+                            const errorMsg = data.error || this.getTranslation('web_unknown_error');
+                            alert(this.getTranslation('web_clear_quote_failed').replace('{error}', errorMsg));
+                        }
+                    } catch (error) {
+                        console.error('清除引用数据失败:', error);
+                        alert(this.getTranslation('web_clear_quote_failed').replace('{error}', error.message));
+                    }
+                },
+                
+                // 删除推文
+                async deleteTweet(type) {
+                    if (!this.tweetToDelete) return;
+                    
+                    try {
+                        let url = `/api/tweet/${this.tweetToDelete.id}?type=${type}`;
+                        if (this.deleteMediaFiles) {
+                            url += '&delete_media=1';
+                        }
+                        const response = await fetch(url, {
+                            method: 'DELETE'
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            // 删除成功，重新加载当前页
+                            this.closeDeleteDialog();
+                            await this.loadTweets(this.currentPage);
+                        } else {
+                            const errorMsg = data.error || this.getTranslation('web_unknown_error');
+                            alert(this.getTranslation('web_delete_failed').replace('{error}', errorMsg));
+                        }
+                    } catch (error) {
+                        console.error('删除推文失败:', error);
+                        alert(this.getTranslation('web_delete_failed').replace('{error}', error.message));
+                    }
+                },
+                
+                // 穿越模式 - 开始
+                startTravelerMode(event) {
+                    if (this.totalPages <= 1) return;
+                    
+                    this.travelerMode = true;
+                    this.travelerPage = this.currentPage;
+                    this.travelerInCancelZone = false;
+                    document.documentElement.classList.add('modal-open');
+                    
+                    // 获取起始位置
+                    if (event.type === 'touchstart') {
+                        this.travelerStartX = event.touches[0].clientX;
+                    } else {
+                        this.travelerStartX = event.clientX;
+                    }
+                },
+                
+                // 穿越模式 - 更新页码
+                updateTravelerPage(event) {
+                    if (!this.travelerMode) return;
+                    
+                    let clientX, clientY;
+                    if (event.type === 'touchmove') {
+                        clientX = event.touches[0].clientX;
+                        clientY = event.touches[0].clientY;
+                    } else {
+                        clientX = event.clientX;
+                        clientY = event.clientY;
+                    }
+                    
+                    // 检测是否在取消区域（屏幕底部 80px）
+                    this.travelerInCancelZone = clientY > window.innerHeight - 80;
+                    
+                    // 根据横向位置计算页码
+                    // 屏幕最左边是第1页，最右边是最后一页
+                    const screenWidth = window.innerWidth;
+                    const padding = 20; // 左右留一些边距
+                    const effectiveWidth = screenWidth - padding * 2;
+                    const relativeX = Math.max(0, Math.min(effectiveWidth, clientX - padding));
+                    const ratio = relativeX / effectiveWidth;
+                    
+                    // 计算页码（1 到 totalPages）
+                    this.travelerPage = Math.max(1, Math.min(this.totalPages, Math.round(ratio * (this.totalPages - 1)) + 1));
+                },
+                
+                // 穿越模式 - 结束
+                endTravelerMode(event) {
+                    if (!this.travelerMode) return;
+                    
+                    // 如果在取消区域，不跳转
+                    if (this.travelerInCancelZone) {
+                        this.cancelTravelerMode();
+                        return;
+                    }
+                    
+                    // 跳转到选择的页面
+                    const targetPage = this.travelerPage;
+                    this.travelerMode = false;
+                    document.documentElement.classList.remove('modal-open');
+                    
+                    if (targetPage !== this.currentPage) {
+                        this.goToPage(targetPage);
+                    }
+                },
+                
+                // 穿越模式 - 取消
+                cancelTravelerMode() {
+                    this.travelerMode = false;
+                    this.travelerInCancelZone = false;
+                    document.documentElement.classList.remove('modal-open');
+                },
+                
+                // 打开搜索对话框
+                openSearchDialog() {
+                    this.searchDialogOpen = true;
+                    document.documentElement.classList.add('modal-open');
+                    // 如果已有搜索，填入之前的关键词
+                    if (this.isSearchMode) {
+                        this.searchKeyword = this.currentSearchKeyword;
+                    }
+                    // 如果已有筛选，恢复筛选状态
+                    if (this.isFilterMode) {
+                        this.filterUndownloadedMedia = true;
+                    }
+                },
+                
+                // 关闭搜索对话框
+                closeSearchDialog() {
+                    this.searchDialogOpen = false;
+                    document.documentElement.classList.remove('modal-open');
+                },
+                
+                // 执行搜索/筛选
+                doSearch() {
+                    const keyword = this.searchKeyword.trim();
+                    // 只有在有关键词且至少勾选了一个搜索范围时，才算有效的关键词搜索
+                    const hasKeywordSearch = keyword && (this.searchInName || this.searchInScreenName || this.searchInText);
+                    const hasFilter = this.filterUndownloadedMedia;
+                    
+                    // 必须有搜索关键词或筛选条件
+                    if (!hasKeywordSearch && !hasFilter) return;
+                    
+                    // 设置搜索模式（只有有效的关键词搜索才算搜索模式）
+                    this.isSearchMode = hasKeywordSearch;
+                    this.currentSearchKeyword = hasKeywordSearch ? keyword : '';
+                    this.isFilterMode = hasFilter;
+                    this.closeSearchDialog();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    this.loadTweets(1);
+                },
+                
+                // 清除搜索
+                clearSearch() {
+                    this.isSearchMode = false;
+                    this.isFilterMode = false;
+                    this.currentSearchKeyword = '';
+                    this.searchKeyword = '';
+                    this.filterUndownloadedMedia = false;
+                    this.closeSearchDialog();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    this.loadTweets(1);
+                },
+                
+                // 重置所有设置
+                resetSettings() {
+                    // 删除所有保存的 cookie
+                    deleteCookie('twegui_avatarSource');
+                    deleteCookie('twegui_perPage');
+                    
+                    // 恢复默认值
+                    this.avatarSource = 'mixed';
+                    this.perPage = 10;
+                    
+                    // 重新加载第一页
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                    this.loadTweets(1);
+                },
+                
+                // 定位到推文（在非搜索模式下找到该推文所在的页面）
+                async locateTweet(tweet) {
+                    if (!tweet || !tweet.id) return;
+                    
+                    try {
+                        const response = await fetch(`/api/tweet/${tweet.id}/locate?per_page=${this.perPage}`);
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            // 清除搜索/筛选模式
+                            this.isSearchMode = false;
+                            this.isFilterMode = false;
+                            this.currentSearchKeyword = '';
+                            this.searchKeyword = '';
+                            this.filterUndownloadedMedia = false;
+                            
+                            // 跳转到推文所在的页面
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                            this.loadTweets(data.page);
+                        } else {
+                            const errorMsg = data.error || this.getTranslation('web_unknown_error');
+                            alert(this.getTranslation('web_locate_failed').replace('{error}', errorMsg));
+                        }
+                    } catch (error) {
+                        console.error('定位推文失败:', error);
+                        alert(this.getTranslation('web_locate_failed').replace('{error}', error.message));
+                    }
+                },
+                
+                // 重载服务器（刷新媒体缓存）
+                async reloadServer() {
+                    if (this.isReloading) return;
+                    
+                    this.isReloading = true;
+                    
+                    try {
+                        const response = await fetch('/api/reload', {
+                            method: 'POST'
+                        });
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            // 提示成功并刷新页面
+<!--                            alert(this.getTranslation('web_reload_success'));-->
+                            window.location.reload();
+                        } else {
+                            const errorMsg = data.error || this.getTranslation('web_unknown_error');
+                            alert(this.getTranslation('web_reload_failed').replace('{error}', errorMsg));
+                        }
+                    } catch (error) {
+                        console.error('重载服务器失败:', error);
+                        alert(this.getTranslation('web_reload_failed').replace('{error}', error.message));
+                    } finally {
+                        this.isReloading = false;
+                    }
+                }
+            };
+        }
+    </script>
+</body>
+</html>
