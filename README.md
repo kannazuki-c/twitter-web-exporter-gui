@@ -10,7 +10,7 @@
     <a href="" target="_blank">
     <img src="https://img.shields.io/badge/python-a?logo=python&logoColor=white&labelColor=gray&color=blue"></a>
 <p align="center">
-    <img src=https://github.com/user-attachments/assets/fc4fe04c-06c6-4c2b-9535-cc9cf4d00c2d width=500/>
+    <img src=https://github.com/user-attachments/assets/dad59659-4410-407f-9315-b144e75d6245 width=500/>
 </p>
 
 </div>
